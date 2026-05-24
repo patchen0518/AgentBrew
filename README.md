@@ -11,7 +11,10 @@ Every AI agent currently has its own way of installing and managing plugins, ski
 AgentBrew acts as a **Universal Translator**. You install your tools and skills into AgentBrew once, and they instantly become available to *all* your connected agents through a single Model Context Protocol (MCP) endpoint.
 
 - **Zero Configuration:** AgentBrew is designed to be spawned automatically by your AI agent. No background daemons to manage.
-- **Polyglot Support:** Automatically detects and manages Node.js MCP servers, Python scripts, and Markdown skills.
+- **Automatic Dependency Management:** Clones repos and automatically runs `npm install`, `pnpm install`, or `pip install` (into a local virtual environment).
+- **Monorepo & Recursive Support:** Automatically discovers MCP servers nested deep within repositories (e.g., in `packages/` or `src/mcp-servers/`).
+- **Dynamic MCP Proxying:** Proxies all calls to sub-servers in real-time, handling tool name collisions and providing a unified interface.
+- **Polyglot Support:** Detects Node.js servers, Python projects (with isolated venvs), and Markdown skills.
 - **Enable/Disable:** Easily toggle specific tools or skills without uninstalling them.
 - **Centralized Management:** A single CLI to `install`, `uninstall`, `list`, `enable`, and `disable` all your agent capabilities.
 
@@ -76,9 +79,10 @@ Run the following command:
 
 ## 🏗 Architecture
 - **CLI:** A single entry point for both human management and machine communication.
-- **Registry:** An intelligent engine that auto-detects tool types (Node/Python/Markdown).
+- **Installer:** Handles cloning and isolated dependency resolution (`npm`, `pnpm`, `pip` + `venv`).
+- **Registry:** Recursively discovers `agentbrew.toml` or `package.json` files up to 2 levels deep to support monorepos.
 - **State Manager:** Remembers your enabled/disabled preferences in `~/.agentbrew/state.json`.
-- **MCP Multiplexer:** Aggregates all enabled tools into a single MCP interface.
+- **MCP Multiplexer:** A dynamic proxy that connects to multiple child MCP servers via Stdio and aggregates their tools into a single, unified interface.
 
 ## 📄 License
 ISC
