@@ -44,11 +44,20 @@ export class Daemon {
     });
 
     this.mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
-      console.log(`Routing tool call: ${request.params.name}`);
-      // Routing logic to child processes would go here
-      return {
-        content: [{ type: "text", text: `Routed call to ${request.params.name}` }],
-      };
+      const fullName = request.params.name;
+      const separatorIndex = fullName.lastIndexOf('_');
+      if (separatorIndex === -1) throw new Error("Invalid tool name format");
+      
+      const prefix = fullName.substring(0, separatorIndex);
+      const toolName = fullName.substring(separatorIndex + 1);
+      
+      const client = this.clients.get(prefix);
+      if (!client) throw new Error(`No client found for prefix: ${prefix}`);
+      
+      return await client.callTool({
+          name: toolName,
+          arguments: request.params.arguments
+      });
     });
   }
 
