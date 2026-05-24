@@ -71,15 +71,19 @@ export class Daemon {
   private async initializePackage(pkg: PackageInfo) {
     if (pkg.manifest.servers) {
       for (const server of pkg.manifest.servers) {
-        const transport = new StdioClientTransport({
-          command: server.command,
-          args: server.args,
-          stderr: 'inherit',
-          cwd: pkg.path
-        });
-        const client = new Client({ name: "agentbrew-client", version: "1.0.0" }, { capabilities: {} });
-        await client.connect(transport);
-        this.clients.set(`${pkg.manifest.name}_${server.name}`, client);
+        try {
+          const transport = new StdioClientTransport({
+            command: server.command,
+            args: server.args,
+            stderr: 'inherit',
+            cwd: pkg.path
+          });
+          const client = new Client({ name: "agentbrew-client", version: "1.0.0" }, { capabilities: {} });
+          await client.connect(transport);
+          this.clients.set(`${pkg.manifest.name}_${server.name}`, client);
+        } catch (e) {
+          console.error(`Failed to initialize server ${pkg.manifest.name}_${server.name}:`, e);
+        }
       }
     }
   }
