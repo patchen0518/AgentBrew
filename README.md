@@ -10,14 +10,12 @@ Every AI agent currently has its own way of installing and managing plugins, ski
 ## 🍺 The Solution: AgentBrew
 AgentBrew acts as a **Universal Translator**. You install your tools and skills into AgentBrew once, and they instantly become available to *all* your connected agents through a single Model Context Protocol (MCP) endpoint.
 
+- **Zero Configuration:** AgentBrew is designed to be spawned automatically by your AI agent. No background daemons to manage.
 - **Polyglot Support:** Automatically detects and manages Node.js MCP servers, Python scripts, and Markdown skills.
-- **Process Supervision:** AgentBrew runs as a background daemon, monitoring tool health and automatically restarting crashed processes.
-- **Centralized Management:** A single CLI to `install`, `uninstall`, and `list` all your agent capabilities.
-- **MCP Router:** A unified multiplexer that routes messages from your agent to the correct underlying tool.
+- **Enable/Disable:** Easily toggle specific tools or skills without uninstalling them.
+- **Centralized Management:** A single CLI to `install`, `uninstall`, `list`, `enable`, and `disable` all your agent capabilities.
 
 ## 🛠 Installation
-
-*(Note: Currently in development)*
 
 ```bash
 # Clone the repository
@@ -29,26 +27,58 @@ npm install
 
 # Build the project
 npm run build
+
+# Link the command globally
+npm link
 ```
 
 ## 📖 Usage
 
 ### Installing a Package
-You can install any compatible tool directly from a Git URL:
+Install any compatible tool or skill directly from a Git URL:
 ```bash
 agentbrew install https://github.com/organization/my-awesome-tool
 ```
 
-### Starting the Daemon
-The background daemon manages your tools and exposes the MCP endpoint:
+### Managing Packages
 ```bash
-agentbrew daemon start
+# List all installed packages and their status
+agentbrew list
+
+# Disable a specific tool
+agentbrew disable my-awesome-tool
+
+# Re-enable a tool
+agentbrew enable my-awesome-tool
+
+# Completely remove a package
+agentbrew uninstall my-awesome-tool
+```
+
+## 🤖 Connecting your AI Agent
+AgentBrew uses a JIT (Just-In-Time) execution model. You don't need to start it manually. Instead, configure your AI agent to launch `agentbrew` as its MCP server.
+
+### For Gemini CLI
+Add this to your configuration:
+```json
+"mcpServers": {
+  "agentbrew": {
+    "command": "agentbrew"
+  }
+}
+```
+
+### For Claude Code
+Run the following command:
+```bash
+/plugin add agentbrew agentbrew
 ```
 
 ## 🏗 Architecture
-- **CLI:** User-facing tool for package management.
-- **Daemon:** Background process that supervises child tools and routes MCP traffic.
-- **Registry:** Auto-detection engine that understands how to run polyglot packages with or without an `agentbrew.toml` manifest.
+- **CLI:** A single entry point for both human management and machine communication.
+- **Registry:** An intelligent engine that auto-detects tool types (Node/Python/Markdown).
+- **State Manager:** Remembers your enabled/disabled preferences in `~/.agentbrew/state.json`.
+- **MCP Multiplexer:** Aggregates all enabled tools into a single MCP interface.
 
 ## 📄 License
 ISC

@@ -94,17 +94,18 @@ export class Daemon {
     }
   }
 
-  stop() {
+  async stop() {
     for (const [name, child] of this.processes) {
       console.log(`Stopping server '${name}'...`);
       child.kill();
     }
     this.processes.clear();
+    await this.mcpServer.close();
   }
 }
 
-export function startDaemon() {
+export async function startDaemon() {
   const daemon = new Daemon();
-  daemon.start();
-  return true;
+  await daemon.start();
+  return daemon;
 }

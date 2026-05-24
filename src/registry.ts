@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import * as toml from 'smol-toml';
+import { isPackageEnabled } from './state';
 
 const BREW_ROOT = path.join(os.homedir(), '.agentbrew');
 const PACKAGES_DIR = path.join(BREW_ROOT, 'packages');
@@ -26,9 +27,10 @@ export interface PackageManifest {
 export interface PackageInfo {
   path: string;
   manifest: PackageManifest;
+  isEnabled: boolean;
 }
 
-export function discoverPackages(): PackageInfo[] {
+export function discoverPackages(includeDisabled = false): PackageInfo[] {
   if (!fs.existsSync(PACKAGES_DIR)) return [];
 
   const dirs = fs.readdirSync(PACKAGES_DIR);
@@ -49,7 +51,11 @@ export function discoverPackages(): PackageInfo[] {
       manifest = autoDetectManifest(fullPath);
     }
 
-    packages.push({ path: fullPath, manifest });
+    const isEnabled = isPackageEnabled(manifest.name);
+    
+    if (isEnabled || includeDisabled) {
+      packages.push({ path: fullPath, manifest, isEnabled });
+    }
   }
 
   return packages;
