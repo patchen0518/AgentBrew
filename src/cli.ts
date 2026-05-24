@@ -23,6 +23,31 @@ program
     }
   });
 
+program
+  .command('list')
+  .description('List installed packages')
+  .action(async () => {
+    console.log("Listing packages...");
+    // To be implemented in Task 7 logic
+  });
+
+program
+  .command('uninstall')
+  .description('Uninstall a package')
+  .argument('<name>', 'Name of the package to uninstall')
+  .action(async (name: string) => {
+    console.log(`Uninstalling ${name}...`);
+    // To be implemented in Task 7 logic
+  });
+
+program
+  .command('status')
+  .description('Check daemon status')
+  .action(async () => {
+    console.log("Checking status...");
+    // To be implemented in Task 7 logic
+  });
+
 export function runCLI() {
   program.parse(process.argv);
 }
