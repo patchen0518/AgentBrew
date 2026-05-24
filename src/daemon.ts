@@ -30,29 +30,48 @@ export class Daemon {
 
   private setupMcpHandlers() {
     this.mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
-      const allTools = [];
-      for (const [prefix, client] of this.clients) {
-        const response = await client.listTools();
-        for (const tool of response.tools) {
-            allTools.push({
-                ...tool,
-                name: `${prefix}_${tool.name}`
-            });
+      const allTools: any[] = [];
+      const promises = Array.from(this.clients.entries()).map(async ([prefix, client]) => {
+        try {
+          const response = await client.listTools();
+          const tools = response.tools.map(tool => ({
+            ...tool,
+            name: `${prefix}__${tool.name}`
+          }));
+          return tools;
+        } catch (e) {
+          console.error(`Failed to list tools for ${prefix}:`, e);
+          return [];
         }
+      });
+      
+      const results = await Promise.all(promises);
+      for (const tools of results) {
+        allTools.push(...tools);
       }
       return { tools: allTools };
     });
 
     this.mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
       const fullName = request.params.name;
-      const separatorIndex = fullName.lastIndexOf('_');
-      if (separatorIndex === -1) throw new Error("Invalid tool name format");
       
-      const prefix = fullName.substring(0, separatorIndex);
-      const toolName = fullName.substring(separatorIndex + 1);
+      let matchedPrefix: string | undefined;
+      let toolName: string | undefined;
       
-      const client = this.clients.get(prefix);
-      if (!client) throw new Error(`No client found for prefix: ${prefix}`);
+      for (const prefix of this.clients.keys()) {
+          if (fullName.startsWith(`${prefix}__`)) {
+              matchedPrefix = prefix;
+              toolName = fullName.substring(prefix.length + 2);
+              break;
+          }
+      }
+      
+      if (!matchedPrefix || !toolName) {
+          throw new Error("Invalid tool name format or unknown prefix");
+      }
+      
+      const client = this.clients.get(matchedPrefix);
+      if (!client) throw new Error(`No client found for prefix: ${matchedPrefix}`);
       
       return await client.callTool({
           name: toolName,

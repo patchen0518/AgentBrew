@@ -49,7 +49,7 @@ describe('Daemon Tool Routing', () => {
     // 3. Simulate a tool call
     const request = {
       params: {
-        name: 'test-pkg_server1_my-tool',
+        name: 'test-pkg_server1__my-tool',
         arguments: { arg1: 'val1' }
       }
     };
@@ -77,7 +77,7 @@ describe('Daemon Tool Routing', () => {
       }
     };
 
-    await expect(callToolHandler(request)).rejects.toThrow("Invalid tool name format");
+    await expect(callToolHandler(request)).rejects.toThrow("Invalid tool name format or unknown prefix");
   });
 
   test('throws error for missing client', async () => {
@@ -87,10 +87,39 @@ describe('Daemon Tool Routing', () => {
 
     const request = {
       params: {
-        name: 'unknown-pkg_server_tool',
+        name: 'unknown-pkg_server__tool',
       }
     };
 
-    await expect(callToolHandler(request)).rejects.toThrow("No client found for prefix: unknown-pkg_server");
+    await expect(callToolHandler(request)).rejects.toThrow("Invalid tool name format or unknown prefix");
+  });
+
+  test('successfully routes tool names containing underscores', async () => {
+    const callToolHandler = mockServerInstance.setRequestHandler.mock.calls.find(
+      (call: any) => call[0] === CallToolRequestSchema
+    )?.[1];
+
+    const mockClient = {
+      callTool: jest.fn().mockResolvedValue({ content: [] }),
+      connect: jest.fn(),
+      close: jest.fn(),
+    };
+    
+    // Prefix is 'pkg_srv'
+    // @ts-ignore
+    daemon.clients.set('pkg_srv', mockClient);
+
+    const request = {
+      params: {
+        name: 'pkg_srv__tool_with_underscores',
+      }
+    };
+
+    await callToolHandler(request);
+
+    expect(mockClient.callTool).toHaveBeenCalledWith({
+        name: 'tool_with_underscores',
+        arguments: undefined
+    });
   });
 });
