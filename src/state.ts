@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-const BREW_ROOT = path.join(os.homedir(), '.agentbrew');
+const BREW_ROOT = process.env.AGENTBREW_ROOT || path.join(os.homedir(), '.agentbrew');
 const STATE_FILE = path.join(BREW_ROOT, 'state.json');
 
 export interface AgentBrewState {

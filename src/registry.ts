@@ -4,7 +4,7 @@ import os from 'os';
 import * as toml from 'smol-toml';
 import { isPackageEnabled } from './state';
 
-const BREW_ROOT = path.join(os.homedir(), '.agentbrew');
+const BREW_ROOT = process.env.AGENTBREW_ROOT || path.join(os.homedir(), '.agentbrew');
 const PACKAGES_DIR = path.join(BREW_ROOT, 'packages');
 
 

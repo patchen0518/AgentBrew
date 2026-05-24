@@ -10,7 +10,7 @@ const readFileAsync = fs.promises.readFile;
 const mkdirAsync = fs.promises.mkdir;
 const rmAsync = fs.promises.rm;
 
-const BREW_ROOT = path.join(os.homedir(), '.agentbrew');
+const BREW_ROOT = process.env.AGENTBREW_ROOT || path.join(os.homedir(), '.agentbrew');
 const PACKAGES_DIR = path.join(BREW_ROOT, 'packages');
 
 export async function installPackage(url: string) {
