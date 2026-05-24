@@ -55,7 +55,7 @@ agentbrew enable my-awesome-tool
 agentbrew uninstall my-awesome-tool
 ```
 
-## 🤖 Connecting your AI Agent
+## 🤖 Connecting your AI Agents
 AgentBrew uses a JIT (Just-In-Time) execution model. You don't need to start it manually. Instead, configure your AI agent to launch `agentbrew` as its MCP server.
 
 ### For Gemini CLI
