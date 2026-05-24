@@ -78,5 +78,30 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
     }
   }
 
+  // Detect Python projects
+  const requirementsPath = path.join(pkgPath, 'requirements.txt');
+  if (fs.existsSync(requirementsPath)) {
+    manifest.servers = manifest.servers || [];
+    manifest.servers.push({
+      name: `${manifest.name}-python`,
+      command: 'python3',
+      args: ['main.py'] // Guessing entry point
+    });
+  }
+
+  // Detect Markdown skills
+  const files = fs.readdirSync(pkgPath);
+  const mdFiles = files.filter(f => f.endsWith('.md') && f.toLowerCase() !== 'readme.md');
+  if (mdFiles.length > 0) {
+    manifest.prompts = manifest.prompts || [];
+    for (const file of mdFiles) {
+      manifest.prompts.push({
+        name: path.parse(file).name,
+        file: file,
+        description: `Markdown skill: ${file}`
+      });
+    }
+  }
+
   return manifest;
 }
