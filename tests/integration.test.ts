@@ -37,8 +37,8 @@ args = ["ts-node", "${mockServerPath}"]
 
     test('should list tools and call echo tool via daemon', async () => {
         const transport = new StdioClientTransport({
-            command: 'node',
-            args: [path.join(__dirname, '../dist/cli.js')],
+            command: 'npx',
+            args: ['ts-node', path.join(__dirname, '../src/cli.ts')],
             env: { ...process.env, AGENTBREW_ROOT: TEST_HOME }
         });
 

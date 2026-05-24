@@ -18,11 +18,8 @@ program
 // Default action: Start the MCP Router (for AI agents)
 program
   .action(async () => {
-    // Silencing console output to keep stdout clean for MCP JSON-RPC
-    const originalConsoleLog = console.log;
-    const originalConsoleError = console.error;
-    console.log = () => {};
-    console.error = () => {};
+    // Redirect console.log to console.error to keep stdout clean for MCP JSON-RPC
+    console.log = console.error;
     
     await startDaemon();
   });
