@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // src/cli.ts
 import { Command } from 'commander';
 import { installPackage } from './installer';
@@ -53,7 +54,8 @@ program
     console.log("-------------------");
     for (const pkg of packages) {
       const status = pkg.isEnabled ? "[ENABLED]" : "[DISABLED]";
-      console.log(`${status} ${pkg.manifest.name} (v${pkg.manifest.version})`);
+      const description = pkg.manifest.description ? ` - ${pkg.manifest.description}` : "";
+      console.log(`${status} ${pkg.manifest.name} (v${pkg.manifest.version})${description}`);
     }
   });
 

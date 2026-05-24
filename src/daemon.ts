@@ -80,12 +80,12 @@ export class Daemon {
           stdio: ['pipe', 'pipe', 'pipe']
         });
 
-        child.on('exit', (code) => {
+        child.on('exit', (code: number | null) => {
           console.log(`Server '${server.name}' exited with code ${code}`);
           this.processes.delete(server.name);
         });
 
-        child.stderr?.on('data', (data) => {
+        child.stderr?.on('data', (data: Buffer) => {
           console.error(`[${server.name}] ${data}`);
         });
 

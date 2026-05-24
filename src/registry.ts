@@ -11,6 +11,7 @@ const PACKAGES_DIR = path.join(BREW_ROOT, 'packages');
 export interface PackageManifest {
   name: string;
   version: string;
+  description?: string;
   servers?: {
     name: string;
     command: string;
@@ -73,6 +74,7 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
     const pkgJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
     manifest.name = pkgJson.name || pkgName;
     manifest.version = pkgJson.version || '0.0.0-auto';
+    manifest.description = pkgJson.description || "";
     
     // Simplistic auto-detection for Node MCP servers
     if (pkgJson.scripts?.start) {
@@ -97,7 +99,7 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
 
   // Detect Markdown skills
   const files = fs.readdirSync(pkgPath);
-  const mdFiles = files.filter(f => f.endsWith('.md') && f.toLowerCase() !== 'readme.md');
+  const mdFiles = files.filter((f: string) => f.endsWith('.md') && f.toLowerCase() !== 'readme.md');
   if (mdFiles.length > 0) {
     manifest.prompts = manifest.prompts || [];
     for (const file of mdFiles) {

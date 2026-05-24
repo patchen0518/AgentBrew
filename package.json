@@ -2,9 +2,14 @@
   "name": "agentbrew",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "dist/cli.js",
+  "bin": {
+    "agentbrew": "dist/cli.js"
+  },
   "scripts": {
-    "test": "jest"
+    "build": "tsc",
+    "test": "jest",
+    "start": "ts-node src/cli.ts"
   },
   "keywords": [],
   "author": "",
