@@ -1,5 +1,6 @@
-import { spawn, ChildProcess } from 'child_process';
 import { discoverPackages, PackageInfo } from './registry';
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -8,7 +9,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 export class Daemon {
-  private processes: Map<string, ChildProcess> = new Map();
+  private clients: Map<string, Client> = new Map();
   private mcpServer: Server;
 
   constructor() {
@@ -29,18 +30,14 @@ export class Daemon {
 
   private setupMcpHandlers() {
     this.mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
-      const packages = discoverPackages();
       const allTools = [];
-      for (const pkg of packages) {
-        if (pkg.manifest.servers) {
-          for (const server of pkg.manifest.servers) {
-            // Placeholder: In a real implementation, we would query the child server for its tools
+      for (const [prefix, client] of this.clients) {
+        const response = await client.listTools();
+        for (const tool of response.tools) {
             allTools.push({
-              name: `${pkg.manifest.name}_${server.name}`,
-              description: `Tool from ${pkg.manifest.name}`,
-              inputSchema: { type: "object", properties: {} },
+                ...tool,
+                name: `${prefix}_${tool.name}`
             });
-          }
         }
       }
       return { tools: allTools };
@@ -74,32 +71,25 @@ export class Daemon {
   private async initializePackage(pkg: PackageInfo) {
     if (pkg.manifest.servers) {
       for (const server of pkg.manifest.servers) {
-        console.log(`Starting server '${server.name}' for package '${pkg.manifest.name}'...`);
-        const child = spawn(server.command, server.args, {
-          cwd: pkg.path,
-          stdio: ['pipe', 'pipe', 'pipe']
+        const transport = new StdioClientTransport({
+          command: server.command,
+          args: server.args,
+          stderr: 'inherit',
+          cwd: pkg.path
         });
-
-        child.on('exit', (code: number | null) => {
-          console.log(`Server '${server.name}' exited with code ${code}`);
-          this.processes.delete(server.name);
-        });
-
-        child.stderr?.on('data', (data: Buffer) => {
-          console.error(`[${server.name}] ${data}`);
-        });
-
-        this.processes.set(server.name, child);
+        const client = new Client({ name: "agentbrew-client", version: "1.0.0" }, { capabilities: {} });
+        await client.connect(transport);
+        this.clients.set(`${pkg.manifest.name}_${server.name}`, client);
       }
     }
   }
 
   async stop() {
-    for (const [name, child] of this.processes) {
-      console.log(`Stopping server '${name}'...`);
-      child.kill();
+    for (const [name, client] of this.clients) {
+      console.log(`Stopping client '${name}'...`);
+      await client.close();
     }
-    this.processes.clear();
+    this.clients.clear();
     await this.mcpServer.close();
   }
 }
