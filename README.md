@@ -61,6 +61,8 @@ agentbrew uninstall my-awesome-tool
 ## 🤖 Connecting your AI Agents
 AgentBrew uses a JIT (Just-In-Time) execution model. You don't need to start it manually. Instead, configure your AI agent to launch `agentbrew` as its MCP server.
 
+> **Note on JIT Persistence:** Because AgentBrew spawns MCP servers on-demand and terminates them when the agent session ends, any **in-memory state** within a child server will be lost between sessions. Servers must persist data to disk (e.g., in their own configuration folders or databases) to maintain state across restarts.
+
 ### For Gemini CLI
 Add this to your configuration:
 ```json
@@ -85,4 +87,4 @@ Run the following command:
 - **MCP Multiplexer:** A dynamic proxy that connects to multiple child MCP servers via Stdio and aggregates their tools into a single, unified interface.
 
 ## 📄 License
-ISC
+MIT
