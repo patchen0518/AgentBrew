@@ -31,3 +31,6 @@ Thumbs.db
 # AgentBrew specific
 .agentbrew/
 .gemini_security/
+
+#gemini
+.gemini.gemini/
