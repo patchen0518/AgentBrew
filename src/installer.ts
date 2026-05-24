@@ -2,6 +2,7 @@ import simpleGit from 'simple-git';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import crypto from 'crypto';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -19,12 +20,14 @@ export async function installPackage(url: string) {
     await mkdirAsync(PACKAGES_DIR, { recursive: true });
   }
 
-  // Derive package name from URL (simple version)
-  const pkgName = url.split('/').pop()?.replace('.git', '') || `pkg-${Date.now()}`;
-  const targetPath = path.join(PACKAGES_DIR, pkgName);
+  // Generate a unique name based on the URL to avoid collisions
+  const urlHash = crypto.createHash('sha256').update(url).digest('hex').substring(0, 8);
+  const repoName = url.split('/').pop()?.replace('.git', '') || 'pkg';
+  const pkgDirName = `${repoName}-${urlHash}`;
+  const targetPath = path.join(PACKAGES_DIR, pkgDirName);
 
   if (fs.existsSync(targetPath)) {
-    throw new Error(`Package '${pkgName}' is already installed at ${targetPath}`);
+    throw new Error(`Package from '${url}' is already installed at ${targetPath}`);
   }
 
   const git = simpleGit();

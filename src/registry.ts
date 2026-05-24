@@ -161,10 +161,14 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
         }
     }
 
+    // Improved entry point detection
+    const commonEntryPoints = ['mcp_server.py', 'server.py', 'app.py', 'main.py'];
+    const entryPoint = commonEntryPoints.find(f => fs.existsSync(path.join(pkgPath, f))) || 'main.py';
+
     manifest.servers.push({
       name: `${manifest.name}-python`,
       command: pythonCmd,
-      args: ['main.py'] // Guessing entry point
+      args: [entryPoint]
     });
   }
 

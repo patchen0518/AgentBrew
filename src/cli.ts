@@ -2,7 +2,7 @@
 // src/cli.ts
 import { Command } from 'commander';
 import { installPackage } from './installer';
-import { startDaemon } from './daemon';
+import { startRouter } from './router';
 import { enablePackage, disablePackage } from './state';
 import { discoverPackages } from './registry';
 import fs from 'fs';
@@ -21,7 +21,17 @@ program
     // Redirect console.log to console.error to keep stdout clean for MCP JSON-RPC
     console.log = console.error;
     
-    await startDaemon();
+    const router = await startRouter();
+
+    // Graceful shutdown
+    const shutdown = async () => {
+      console.error("\nShutting down AgentBrew Router...");
+      await router.stop();
+      process.exit(0);
+    };
+
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
   });
 
 program
