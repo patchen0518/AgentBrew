@@ -22,7 +22,9 @@ Every AI agent currently has its own way of installing and managing plugins, ski
 AgentBrew acts as a **Universal Translator**. You install your tools and skills into AgentBrew once, and they instantly become available to *all* your connected agents through a single Model Context Protocol (MCP) endpoint.
 
 - **Zero Configuration:** AgentBrew is designed to be spawned automatically by your AI agent. No background services to manage.
-- **Automatic Dependency Management:** Clones repos and automatically runs `npm install`, `pnpm install`, or `pip install` (into a local virtual environment).
+- **Automatic Dependency Management:** Clones repos and automatically runs `npm install`, `pnpm install`, or Python setup.
+- **Smart Python Support:** Uses **uv** for ultra-fast virtual environment creation and dependency resolution if available; otherwise falls back to standard `venv` + `pip`.
+- **Private Repository Support:** Robustly handles private Git repositories by ensuring clones fail fast with actionable authentication suggestions (SSH/HTTPS) instead of hanging.
 - **Collision-Free Installation:** Uses URL-based hashing to allow multiple repositories with the same name.
 - **Monorepo & Recursive Support:** Automatically discovers MCP servers nested deep within repositories (e.g., in `packages/` or `src/mcp-servers/`).
 - **Full MCP Multiplexing:** Proxies Tools, Prompts, and Resources in real-time, handling name collisions and providing a unified interface.
@@ -93,7 +95,11 @@ Run the following command:
 
 ## 🏗 Architecture
 - **CLI:** A single entry point for both human management and machine communication.
-- **Installer:** Handles cloning and isolated dependency resolution (`npm`, `pnpm`, `pip` + `venv`) with URL-based collision prevention. Includes **build timeouts** (5 min) to ensure robustness.
+- **Installer:** Handles cloning and isolated dependency resolution.
+    - **Node.js:** Supports `npm` and `pnpm`.
+    - **Python:** Features **Smart Resolution**—uses `uv` for high-performance setup with a graceful fallback to `python3 -m venv`.
+    - **Git:** Optimized for headless environments with `GIT_TERMINAL_PROMPT=0` and custom error mapping for authentication failures (SSH/HTTPS).
+    - **Safety:** Includes **build timeouts** (5 min) and URL-based collision prevention.
 - **Registry:** Recursively discovers `agentbrew.toml` or `package.json` files up to 2 levels deep to support monorepos. Includes robust detection for Python entry points and Markdown skills.
 - **State Manager:** Remembers your enabled/disabled preferences in `~/.agentbrew/state.json`.
 - **MCP Router:** A high-performance dynamic proxy that aggregates multiple child MCP servers. Features **Just-In-Time (Lazy) Loading** to minimize memory overhead (servers are only spawned when requested) and **Optimized Resource Routing** for direct URI mapping. Supports graceful shutdown for clean resource management.

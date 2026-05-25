@@ -71,7 +71,7 @@ export async function installPackage(url: string) {
     throw new Error(`Package from '${safeLogUrl}' is already installed at ${targetPath}`);
   }
 
-  const git = simpleGit();
+  const git = simpleGit().env({ ...process.env, GIT_TERMINAL_PROMPT: '0' });
   try {
     Logger.info(`Cloning ${safeLogUrl} into ${targetPath}...`);
     await git.clone(url, targetPath);
@@ -80,13 +80,27 @@ export async function installPackage(url: string) {
     await resolveDependencies(targetPath);
     
     return targetPath;
-  } catch (error) {
-    Logger.error(`Installation failed for ${safeLogUrl}:`, error);
+  } catch (error: any) {
+    let finalError = error;
+    
+    // Provide a clearer message for authentication failures (common in private repos)
+    const errorMsg = error.message || '';
+    if (errorMsg.includes('Authentication failed') || errorMsg.includes('could not read Username') || errorMsg.includes('Permission denied (publickey)')) {
+      finalError = new Error(
+        `Authentication failed for private repository: ${safeLogUrl}\n` +
+        `Suggestions:\n` +
+        `  - If using SSH, ensure your keys are added (ssh-add -l).\n` +
+        `  - If using HTTPS, ensure you have a credential helper configured or provide a token.\n` +
+        `  - Git terminal prompts are disabled to prevent hanging.`
+      );
+    }
+
+    Logger.error(`Installation failed for ${safeLogUrl}:`, finalError.message);
     if (fs.existsSync(targetPath)) {
       Logger.info(`Cleaning up ${targetPath}...`);
       await rmAsync(targetPath, { recursive: true, force: true });
     }
-    throw error;
+    throw finalError;
   }
 }
 
@@ -124,15 +138,30 @@ async function resolveDependencies(pkgPath: string) {
       }
     }
   } else if (fs.existsSync(requirementsPath)) {
-    Logger.info("Setting up Python virtual environment...");
     const venvDir = '.venv';
-    await execAsync(`python3 -m venv ${venvDir}`, execOpts);
-    
-    const pipPath = process.platform === 'win32' 
-      ? path.join(venvDir, 'Scripts', 'pip') 
-      : path.join(venvDir, 'bin', 'pip');
+    let hasUv = false;
+    try {
+      await execAsync('uv --version', { timeout: 2000 });
+      hasUv = true;
+    } catch (e) {
+      // uv not found, will fall back to standard venv
+    }
+
+    if (hasUv) {
+      Logger.info("Setting up Python virtual environment with uv...");
+      await execAsync(`uv venv ${venvDir}`, execOpts);
+      Logger.info("Installing Python dependencies with uv...");
+      await execAsync(`uv pip install -r requirements.txt`, execOpts);
+    } else {
+      Logger.info("Setting up Python virtual environment...");
+      await execAsync(`python3 -m venv ${venvDir}`, execOpts);
       
-    Logger.info("Installing Python dependencies...");
-    await execAsync(`${pipPath} install -r requirements.txt`, execOpts);
+      const pipPath = process.platform === 'win32' 
+        ? path.join(venvDir, 'Scripts', 'pip') 
+        : path.join(venvDir, 'bin', 'pip');
+        
+      Logger.info("Installing Python dependencies...");
+      await execAsync(`${pipPath} install -r requirements.txt`, execOpts);
+    }
   }
 }

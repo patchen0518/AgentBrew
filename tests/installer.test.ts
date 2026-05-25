@@ -39,6 +39,7 @@ describe('Installer', () => {
     mockClone = jest.fn().mockResolvedValue(undefined);
     (simpleGit as jest.Mock).mockReturnValue({
       clone: mockClone,
+      env: jest.fn().mockReturnThis(),
     });
     (fs.existsSync as jest.Mock).mockReturnValue(false);
     
@@ -97,8 +98,8 @@ describe('Installer', () => {
     expect(mockExec).toHaveBeenCalledWith('pnpm run build', expect.objectContaining({ cwd: targetPath }), expect.any(Function));
   });
 
-  test('sets up venv and calls local pip when requirements.txt exists', async () => {
-    const url = 'https://github.com/user/pyrepo.git';
+  test('sets up venv and calls uv pip install when requirements.txt exists and uv is available', async () => {
+    const url = 'https://github.com/user/pyrepo-uv.git';
     const targetPath = getExpectedPath(url);
 
     (fs.existsSync as jest.Mock).mockImplementation((p: string) => {
@@ -111,8 +112,35 @@ describe('Installer', () => {
     await installPackage(url);
 
     expect(mockClone).toHaveBeenCalledWith(url, targetPath);
+    expect(mockExec).toHaveBeenCalledWith('uv --version', { timeout: 2000 }, expect.any(Function));
+    expect(mockExec).toHaveBeenCalledWith('uv venv .venv', expect.objectContaining({ cwd: targetPath }), expect.any(Function));
+    expect(mockExec).toHaveBeenCalledWith('uv pip install -r requirements.txt', expect.objectContaining({ cwd: targetPath }), expect.any(Function));
+  });
+
+  test('falls back to python3 -m venv when uv is not available', async () => {
+    const url = 'https://github.com/user/pyrepo-no-uv.git';
+    const targetPath = getExpectedPath(url);
+
+    (fs.existsSync as jest.Mock).mockImplementation((p: string) => {
+        if (p === targetPath) return false;
+        if (p.endsWith('packages')) return true;
+        if (p.endsWith('requirements.txt')) return true;
+        return false;
+    });
+
+    mockExec.mockImplementation((cmd, opts, callback) => {
+        const cb = typeof opts === 'function' ? opts : callback;
+        if (cmd === 'uv --version') {
+            cb(new Error('command not found'), { stdout: '', stderr: '' });
+        } else {
+            cb(null, { stdout: '', stderr: '' });
+        }
+    });
+
+    await installPackage(url);
+
+    expect(mockExec).toHaveBeenCalledWith('uv --version', { timeout: 2000 }, expect.any(Function));
     expect(mockExec).toHaveBeenCalledWith('python3 -m venv .venv', expect.objectContaining({ cwd: targetPath }), expect.any(Function));
-    
     expect(mockExec).toHaveBeenCalledWith(expect.stringContaining('pip install -r requirements.txt'), expect.objectContaining({ cwd: targetPath }), expect.any(Function));
   });
 
@@ -135,5 +163,15 @@ describe('Installer', () => {
     await expect(installPackage(url)).rejects.toThrow('Clone failed');
 
     expect(fs.promises.rm).toHaveBeenCalledWith(targetPath, expect.objectContaining({ recursive: true }));
+  });
+
+  test('provides helpful error message on authentication failure', async () => {
+    const url = 'git@github.com:private/repo.git';
+    const targetPath = getExpectedPath(url);
+
+    mockClone.mockRejectedValue(new Error('Permission denied (publickey). fatal: Could not read from remote repository.'));
+
+    await expect(installPackage(url)).rejects.toThrow(/Authentication failed for private repository/);
+    await expect(installPackage(url)).rejects.toThrow(/ssh-add -l/);
   });
 });
