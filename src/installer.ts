@@ -17,7 +17,45 @@ const BREW_ROOT = process.env.AGENTBREW_ROOT || path.join(os.homedir(), '.agentb
 const PACKAGES_DIR = path.join(BREW_ROOT, 'packages');
 const INSTALL_TIMEOUT = 300000; // 5 minutes
 
+function redactUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.password) {
+      parsed.password = '****';
+    }
+    return parsed.toString();
+  } catch {
+    // If not a standard URL, use regex as fallback
+    return url.replace(/([^:]+):([^@]+)@/, '$1:****@');
+  }
+}
+
+function validateUrl(url: string) {
+  if (url.trim().startsWith('-')) {
+    throw new Error("Invalid Git URL: URL cannot start with a dash.");
+  }
+  // Basic protocol check
+  const allowedProtocols = ['https:', 'git:', 'ssh:', 'http:'];
+  try {
+    const parsed = new URL(url);
+    if (!allowedProtocols.includes(parsed.protocol)) {
+       // Check if it's an scp-like ssh syntax (e.g. user@host:path)
+       if (!url.includes('@') || !url.includes(':')) {
+         throw new Error(`Invalid protocol: ${parsed.protocol}`);
+       }
+    }
+  } catch (e) {
+    // If URL parsing fails, check if it's a valid SSH shortcut
+    if (!url.includes('@') || !url.includes(':')) {
+        throw new Error("Invalid Git URL format.");
+    }
+  }
+}
+
 export async function installPackage(url: string) {
+  validateUrl(url);
+  const safeLogUrl = redactUrl(url);
+
   // Ensure directories exist
   if (!fs.existsSync(PACKAGES_DIR)) {
     await mkdirAsync(PACKAGES_DIR, { recursive: true });
@@ -30,12 +68,12 @@ export async function installPackage(url: string) {
   const targetPath = path.join(PACKAGES_DIR, pkgDirName);
 
   if (fs.existsSync(targetPath)) {
-    throw new Error(`Package from '${url}' is already installed at ${targetPath}`);
+    throw new Error(`Package from '${safeLogUrl}' is already installed at ${targetPath}`);
   }
 
   const git = simpleGit();
   try {
-    Logger.info(`Cloning ${url} into ${targetPath}...`);
+    Logger.info(`Cloning ${safeLogUrl} into ${targetPath}...`);
     await git.clone(url, targetPath);
     
     // Post-install dependency resolution
@@ -43,7 +81,7 @@ export async function installPackage(url: string) {
     
     return targetPath;
   } catch (error) {
-    Logger.error(`Installation failed for ${url}:`, error);
+    Logger.error(`Installation failed for ${safeLogUrl}:`, error);
     if (fs.existsSync(targetPath)) {
       Logger.info(`Cleaning up ${targetPath}...`);
       await rmAsync(targetPath, { recursive: true, force: true });

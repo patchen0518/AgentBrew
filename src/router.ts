@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { discoverPackages, PackageInfo } from './registry';
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -62,8 +64,16 @@ class ManagedClient {
   }
 }
 
+interface LocalPrompt {
+  pkgPath: string;
+  file: string;
+  name: string;
+  description: string;
+}
+
 export class Router {
   private managedClients: Map<string, ManagedClient> = new Map();
+  private localPrompts: Map<string, LocalPrompt> = new Map();
   private resourceToClient: Map<string, string> = new Map();
   private mcpServer: Server;
 
@@ -126,6 +136,15 @@ export class Router {
     // Prompts
     this.mcpServer.setRequestHandler(ListPromptsRequestSchema, async () => {
       const allPrompts: Prompt[] = [];
+
+      // Add local prompts
+      for (const [prefix, local] of this.localPrompts.entries()) {
+        allPrompts.push({
+          name: prefix,
+          description: local.description
+        });
+      }
+
       const promises = Array.from(this.managedClients.values()).map(async (managed) => {
         try {
           const client = await managed.getClient();
@@ -144,7 +163,30 @@ export class Router {
     });
 
     this.mcpServer.setRequestHandler(GetPromptRequestSchema, async (request) => {
-      const { prefix, name } = this.parseName(request.params.name);
+      const fullName = request.params.name;
+
+      // Check local prompts first
+      const local = this.localPrompts.get(fullName);
+      if (local) {
+        const fullPath = path.join(local.pkgPath, local.file);
+        try {
+          const content = fs.readFileSync(fullPath, 'utf-8');
+          return {
+            description: local.description,
+            messages: [{
+              role: 'user',
+              content: {
+                type: 'text',
+                text: content
+              }
+            }]
+          };
+        } catch (e) {
+          throw new Error(`Failed to read prompt file: ${local.file}`);
+        }
+      }
+
+      const { prefix, name } = this.parseName(fullName);
       const managed = this.managedClients.get(prefix);
       if (!managed) throw new Error(`No client found for prefix: ${prefix}`);
       const client = await managed.getClient();
@@ -252,11 +294,25 @@ export class Router {
   }
 
   private registerPackage(pkg: PackageInfo) {
+    // Register executable servers
     if (pkg.manifest.servers) {
       for (const server of pkg.manifest.servers) {
         const prefix = `${pkg.manifest.name}_${server.name}`;
         const managed = new ManagedClient(prefix, pkg.path, server);
         this.managedClients.set(prefix, managed);
+      }
+    }
+
+    // Register local markdown prompts
+    if (pkg.manifest.prompts) {
+      for (const prompt of pkg.manifest.prompts) {
+        const prefix = `${pkg.manifest.name}__${prompt.name}`;
+        this.localPrompts.set(prefix, {
+          pkgPath: pkg.path,
+          file: prompt.file,
+          name: prompt.name,
+          description: prompt.description
+        });
       }
     }
   }
