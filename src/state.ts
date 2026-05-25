@@ -49,7 +49,13 @@ export function disablePackage(pkgName: string) {
   return false; // already disabled
 }
 
-export function isPackageEnabled(pkgName: string): boolean {
+export function isPackageEnabled(pkgName: string, capabilityName?: string): boolean {
   const state = loadState();
-  return !state.disabledPackages.includes(pkgName);
+  if (state.disabledPackages.includes(pkgName)) {
+    return false;
+  }
+  if (capabilityName && state.disabledPackages.includes(`${pkgName}:${capabilityName}`)) {
+    return false;
+  }
+  return true;
 }
