@@ -1,4 +1,4 @@
-import { Daemon } from '../src/daemon';
+import { Router } from '../src/router';
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -6,8 +6,8 @@ import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 jest.mock("@modelcontextprotocol/sdk/server/index.js");
 jest.mock("@modelcontextprotocol/sdk/client/index.js");
 
-describe('Daemon Tool Routing', () => {
-  let daemon: Daemon;
+describe('Router Tool Routing', () => {
+  let router: Router;
   let mockServerInstance: any;
 
   beforeEach(() => {
@@ -21,7 +21,7 @@ describe('Daemon Tool Routing', () => {
     };
     (Server as jest.Mock).mockReturnValue(mockServerInstance);
 
-    daemon = new Daemon();
+    router = new Router();
   });
 
   test('routes tool call to correct client', async () => {
@@ -33,7 +33,7 @@ describe('Daemon Tool Routing', () => {
 
     expect(callToolHandler).toBeDefined();
 
-    // 2. Setup mock clients (populating private clients map via initialization)
+    // 2. Setup mock managed client
     const mockClient = {
       callTool: jest.fn().mockResolvedValue({
         content: [{ type: "text", text: "Success" }]
@@ -42,9 +42,15 @@ describe('Daemon Tool Routing', () => {
       close: jest.fn(),
     };
     
-    // Inject the mock client into the private clients map
+    const mockManagedClient = {
+        prefix: 'test-pkg_server1',
+        getClient: jest.fn().mockResolvedValue(mockClient),
+        stop: jest.fn()
+    };
+    
+    // Inject the mock managed client into the private managedClients map
     // @ts-ignore
-    daemon.clients.set('test-pkg_server1', mockClient);
+    router.managedClients.set('test-pkg_server1', mockManagedClient);
 
     // 3. Simulate a tool call
     const request = {
@@ -77,7 +83,7 @@ describe('Daemon Tool Routing', () => {
       }
     };
 
-    await expect(callToolHandler(request)).rejects.toThrow("Invalid tool name format or unknown prefix");
+    await expect(callToolHandler(request)).rejects.toThrow("Invalid name format or unknown prefix");
   });
 
   test('throws error for missing client', async () => {
@@ -91,7 +97,7 @@ describe('Daemon Tool Routing', () => {
       }
     };
 
-    await expect(callToolHandler(request)).rejects.toThrow("Invalid tool name format or unknown prefix");
+    await expect(callToolHandler(request)).rejects.toThrow("Invalid name format or unknown prefix");
   });
 
   test('successfully routes tool names containing underscores', async () => {
@@ -105,9 +111,14 @@ describe('Daemon Tool Routing', () => {
       close: jest.fn(),
     };
     
-    // Prefix is 'pkg_srv'
+    const mockManagedClient = {
+        prefix: 'pkg_srv',
+        getClient: jest.fn().mockResolvedValue(mockClient),
+        stop: jest.fn()
+    };
+    
     // @ts-ignore
-    daemon.clients.set('pkg_srv', mockClient);
+    router.managedClients.set('pkg_srv', mockManagedClient);
 
     const request = {
       params: {

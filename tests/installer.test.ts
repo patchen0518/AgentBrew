@@ -4,6 +4,7 @@ import { exec } from 'child_process';
 import simpleGit from 'simple-git';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 
 jest.mock('child_process');
 jest.mock('simple-git');
@@ -20,6 +21,14 @@ jest.mock('fs', () => {
         }
     };
 });
+
+function getExpectedPath(url: string) {
+    const urlHash = crypto.createHash('sha256').update(url).digest('hex').substring(0, 8);
+    const repoName = url.split('/').pop()?.replace('.git', '') || 'pkg';
+    const pkgDirName = `${repoName}-${urlHash}`;
+    const brewRoot = path.join(process.env.HOME || '', '.agentbrew');
+    return path.join(brewRoot, 'packages', pkgDirName);
+}
 
 describe('Installer', () => {
   let mockClone: jest.Mock;
@@ -45,11 +54,10 @@ describe('Installer', () => {
 
   test('calls npm install and build when package.json exists', async () => {
     const url = 'https://github.com/user/repo.git';
-    const pkgName = 'repo';
-    const targetPath = path.join(process.env.HOME || '', '.agentbrew', 'packages', pkgName);
+    const targetPath = getExpectedPath(url);
 
     (fs.existsSync as jest.Mock).mockImplementation((p: string) => {
-        if (p.endsWith('repo')) return false;
+        if (p === targetPath) return false;
         if (p.endsWith('packages')) return true;
         if (p.endsWith('package.json')) return true;
         return false;
@@ -68,11 +76,10 @@ describe('Installer', () => {
 
   test('calls pnpm install and pnpm run build when pnpm-lock.yaml and package.json with build exist', async () => {
     const url = 'https://github.com/user/pnpmrepo.git';
-    const pkgName = 'pnpmrepo';
-    const targetPath = path.join(process.env.HOME || '', '.agentbrew', 'packages', pkgName);
+    const targetPath = getExpectedPath(url);
 
     (fs.existsSync as jest.Mock).mockImplementation((p: string) => {
-        if (p.endsWith('pnpmrepo')) return false;
+        if (p === targetPath) return false;
         if (p.endsWith('packages')) return true;
         if (p.endsWith('pnpm-lock.yaml')) return true;
         if (p.endsWith('package.json')) return true;
@@ -92,11 +99,10 @@ describe('Installer', () => {
 
   test('sets up venv and calls local pip when requirements.txt exists', async () => {
     const url = 'https://github.com/user/pyrepo.git';
-    const pkgName = 'pyrepo';
-    const targetPath = path.join(process.env.HOME || '', '.agentbrew', 'packages', pkgName);
+    const targetPath = getExpectedPath(url);
 
     (fs.existsSync as jest.Mock).mockImplementation((p: string) => {
-        if (p.endsWith('pyrepo')) return false;
+        if (p === targetPath) return false;
         if (p.endsWith('packages')) return true;
         if (p.endsWith('requirements.txt')) return true;
         return false;
@@ -107,18 +113,16 @@ describe('Installer', () => {
     expect(mockClone).toHaveBeenCalledWith(url, targetPath);
     expect(mockExec).toHaveBeenCalledWith('python3 -m venv .venv', expect.objectContaining({ cwd: targetPath }), expect.any(Function));
     
-    const expectedPip = process.platform === 'win32' ? 'Scriptspip' : 'bin/pip';
     expect(mockExec).toHaveBeenCalledWith(expect.stringContaining('pip install -r requirements.txt'), expect.objectContaining({ cwd: targetPath }), expect.any(Function));
   });
 
   test('cleans up target directory on failure', async () => {
     const url = 'https://github.com/user/failrepo.git';
-    const pkgName = 'failrepo';
-    const targetPath = path.join(process.env.HOME || '', '.agentbrew', 'packages', pkgName);
+    const targetPath = getExpectedPath(url);
 
     let failRepoExists = false;
     (fs.existsSync as jest.Mock).mockImplementation((p: string) => {
-        if (p.endsWith('failrepo')) return failRepoExists;
+        if (p === targetPath) return failRepoExists;
         if (p.endsWith('packages')) return true;
         return false;
     });

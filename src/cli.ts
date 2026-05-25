@@ -8,6 +8,8 @@ import { discoverPackages } from './registry';
 import fs from 'fs';
 import path from 'path';
 
+import { Logger } from './logger';
+
 const program = new Command();
 
 program
@@ -18,14 +20,11 @@ program
 // Default action: Start the MCP Router (for AI agents)
 program
   .action(async () => {
-    // Redirect console.log to console.error to keep stdout clean for MCP JSON-RPC
-    console.log = console.error;
-    
     const router = await startRouter();
 
     // Graceful shutdown
     const shutdown = async () => {
-      console.error("\nShutting down AgentBrew Router...");
+      Logger.info("Shutting down AgentBrew Router...");
       await router.stop();
       process.exit(0);
     };
@@ -41,9 +40,9 @@ program
   .action(async (url: string) => {
     try {
       await installPackage(url);
-      console.log(`Successfully installed package from ${url}`);
+      Logger.info(`Successfully installed package from ${url}`);
     } catch (error: any) {
-      console.error(`Failed to install package: ${error.message}`);
+      Logger.error(`Failed to install package: ${error.message}`);
       process.exit(1);
     }
   });
@@ -54,15 +53,15 @@ program
   .action(async () => {
     const packages = discoverPackages(true); // include disabled
     if (packages.length === 0) {
-      console.log("No packages installed.");
+      Logger.info("No packages installed.");
       return;
     }
-    console.log("Installed Packages:");
-    console.log("-------------------");
+    Logger.info("Installed Packages:");
+    Logger.info("-------------------");
     for (const pkg of packages) {
       const status = pkg.isEnabled ? "[ENABLED]" : "[DISABLED]";
       const description = pkg.manifest.description ? ` - ${pkg.manifest.description}` : "";
-      console.log(`${status} ${pkg.manifest.name} (v${pkg.manifest.version})${description}`);
+      Logger.info(`${status} ${pkg.manifest.name} (v${pkg.manifest.version})${description}`);
     }
   });
 
@@ -72,9 +71,9 @@ program
   .argument('<name>', 'Name of the package to enable')
   .action((name: string) => {
     if (enablePackage(name)) {
-      console.log(`Enabled package '${name}'`);
+      Logger.info(`Enabled package '${name}'`);
     } else {
-      console.log(`Package '${name}' is already enabled.`);
+      Logger.info(`Package '${name}' is already enabled.`);
     }
   });
 
@@ -84,9 +83,9 @@ program
   .argument('<name>', 'Name of the package to disable')
   .action((name: string) => {
     if (disablePackage(name)) {
-      console.log(`Disabled package '${name}'`);
+      Logger.info(`Disabled package '${name}'`);
     } else {
-      console.log(`Package '${name}' is already disabled.`);
+      Logger.info(`Package '${name}' is already disabled.`);
     }
   });
 
@@ -98,15 +97,15 @@ program
     const packages = discoverPackages(true);
     const target = packages.find(p => p.manifest.name === name);
     if (!target) {
-      console.error(`Package '${name}' not found.`);
+      Logger.error(`Package '${name}' not found.`);
       process.exit(1);
     }
     try {
-      console.log(`Uninstalling ${name} from ${target.path}...`);
+      Logger.info(`Uninstalling ${name} from ${target.path}...`);
       fs.rmSync(target.path, { recursive: true, force: true });
-      console.log(`Successfully uninstalled ${name}`);
+      Logger.info(`Successfully uninstalled ${name}`);
     } catch (error: any) {
-      console.error(`Failed to uninstall: ${error.message}`);
+      Logger.error(`Failed to uninstall: ${error.message}`);
       process.exit(1);
     }
   });

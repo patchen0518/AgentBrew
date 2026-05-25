@@ -11,10 +11,60 @@ import {
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
   ListResourceTemplatesRequestSchema,
+  Tool,
+  Prompt,
+  Resource,
+  ResourceTemplate,
 } from "@modelcontextprotocol/sdk/types.js";
+import { Logger } from './logger';
+
+class ManagedClient {
+  private client: Client | null = null;
+  private transport: StdioClientTransport | null = null;
+
+  constructor(
+    public prefix: string,
+    private pkgPath: string,
+    private serverConfig: { command: string; args: string[] }
+  ) {}
+
+  async getClient(): Promise<Client> {
+    if (this.client) return this.client;
+
+    Logger.info(`Starting MCP server for ${this.prefix}...`);
+    this.transport = new StdioClientTransport({
+      command: this.serverConfig.command,
+      args: this.serverConfig.args,
+      stderr: 'inherit',
+      cwd: this.pkgPath,
+    });
+
+    this.client = new Client(
+      { name: "agentbrew-client", version: "1.0.0" },
+      { capabilities: {} }
+    );
+
+    await this.client.connect(this.transport);
+    return this.client;
+  }
+
+  async stop() {
+    if (this.client) {
+      Logger.info(`Stopping MCP server for ${this.prefix}...`);
+      await this.client.close();
+      this.client = null;
+      this.transport = null;
+    }
+  }
+
+  isConnected(): boolean {
+    return this.client !== null;
+  }
+}
 
 export class Router {
-  private clients: Map<string, Client> = new Map();
+  private managedClients: Map<string, ManagedClient> = new Map();
+  private resourceToClient: Map<string, string> = new Map();
   private mcpServer: Server;
 
   constructor() {
@@ -37,17 +87,17 @@ export class Router {
 
   private setupMcpHandlers() {
     this.mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
-      const allTools: any[] = [];
-      const promises = Array.from(this.clients.entries()).map(async ([prefix, client]) => {
+      const allTools: Tool[] = [];
+      const promises = Array.from(this.managedClients.values()).map(async (managed) => {
         try {
+          const client = await managed.getClient();
           const response = await client.listTools();
-          const tools = response.tools.map(tool => ({
+          return response.tools.map(tool => ({
             ...tool,
-            name: `${prefix}__${tool.name}`
+            name: `${managed.prefix}__${tool.name}`
           }));
-          return tools;
         } catch (e) {
-          console.error(`Failed to list tools for ${prefix}:`, e);
+          Logger.error(`Failed to list tools for ${managed.prefix}:`, e);
           return [];
         }
       });
@@ -63,9 +113,10 @@ export class Router {
       const fullName = request.params.name;
       const { prefix, name } = this.parseName(fullName);
       
-      const client = this.clients.get(prefix);
-      if (!client) throw new Error(`No client found for prefix: ${prefix}`);
+      const managed = this.managedClients.get(prefix);
+      if (!managed) throw new Error(`No client found for prefix: ${prefix}`);
       
+      const client = await managed.getClient();
       return await client.callTool({
           name: name,
           arguments: request.params.arguments
@@ -74,13 +125,14 @@ export class Router {
 
     // Prompts
     this.mcpServer.setRequestHandler(ListPromptsRequestSchema, async () => {
-      const allPrompts: any[] = [];
-      const promises = Array.from(this.clients.entries()).map(async ([prefix, client]) => {
+      const allPrompts: Prompt[] = [];
+      const promises = Array.from(this.managedClients.values()).map(async (managed) => {
         try {
+          const client = await managed.getClient();
           const response = await client.listPrompts();
           return response.prompts.map(prompt => ({
             ...prompt,
-            name: `${prefix}__${prompt.name}`
+            name: `${managed.prefix}__${prompt.name}`
           }));
         } catch (e) {
           return [];
@@ -93,8 +145,9 @@ export class Router {
 
     this.mcpServer.setRequestHandler(GetPromptRequestSchema, async (request) => {
       const { prefix, name } = this.parseName(request.params.name);
-      const client = this.clients.get(prefix);
-      if (!client) throw new Error(`No client found for prefix: ${prefix}`);
+      const managed = this.managedClients.get(prefix);
+      if (!managed) throw new Error(`No client found for prefix: ${prefix}`);
+      const client = await managed.getClient();
       return await client.getPrompt({
         name: name,
         arguments: request.params.arguments
@@ -103,14 +156,19 @@ export class Router {
 
     // Resources
     this.mcpServer.setRequestHandler(ListResourcesRequestSchema, async () => {
-      const allResources: any[] = [];
-      const promises = Array.from(this.clients.entries()).map(async ([prefix, client]) => {
+      const allResources: Resource[] = [];
+      const promises = Array.from(this.managedClients.values()).map(async (managed) => {
         try {
+          const client = await managed.getClient();
           const response = await client.listResources();
-          return response.resources.map(resource => ({
-            ...resource,
-            name: `${prefix}__${resource.name}`
-          }));
+          return response.resources.map(resource => {
+            // Resource routing: track which client owns this URI
+            this.resourceToClient.set(resource.uri, managed.prefix);
+            return {
+              ...resource,
+              name: `${managed.prefix}__${resource.name}`
+            };
+          });
         } catch (e) {
           return [];
         }
@@ -121,35 +179,39 @@ export class Router {
     });
 
     this.mcpServer.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-      // For ReadResource, we look at the URI. 
-      // This is trickier as URIs don't have our prefix.
-      // However, if we assume ListResources returned prefixed names, we might need a better strategy.
-      // Actually, many agents use URI directly.
-      // For now, let's prefix the URIs too during ListResources if we want to be safe, 
-      // but standard MCP URI schemes might break.
-      // Let's stick to name-based routing where possible.
-      // ReadResource doesn't take a name, it takes a URI.
-      // We'll have to broadcast or track which client owns which URI.
+      const uri = request.params.uri;
+      const prefix = this.resourceToClient.get(uri);
       
-      // Simple broadcast strategy for ReadResource:
-      for (const client of this.clients.values()) {
+      if (prefix) {
+        const managed = this.managedClients.get(prefix);
+        if (managed) {
+          const client = await managed.getClient();
+          return await client.readResource({ uri });
+        }
+      }
+
+      // Fallback to broadcast if URI wasn't discovered or prefix is missing
+      Logger.warn(`URI ${uri} not found in cache, falling back to broadcast`);
+      for (const managed of this.managedClients.values()) {
         try {
-          return await client.readResource({ uri: request.params.uri });
+          const client = await managed.getClient();
+          return await client.readResource({ uri });
         } catch (e) {
           // Continue to next client
         }
       }
-      throw new Error(`Resource not found: ${request.params.uri}`);
+      throw new Error(`Resource not found: ${uri}`);
     });
 
     this.mcpServer.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
-      const allTemplates: any[] = [];
-      const promises = Array.from(this.clients.entries()).map(async ([prefix, client]) => {
+      const allTemplates: ResourceTemplate[] = [];
+      const promises = Array.from(this.managedClients.values()).map(async (managed) => {
         try {
+          const client = await managed.getClient();
           const response = await client.listResourceTemplates();
           return response.resourceTemplates.map(template => ({
             ...template,
-            name: `${prefix}__${template.name}`
+            name: `${managed.prefix}__${template.name}`
           }));
         } catch (e) {
           return [];
@@ -162,7 +224,7 @@ export class Router {
   }
 
   private parseName(fullName: string): { prefix: string, name: string } {
-    for (const prefix of this.clients.keys()) {
+    for (const prefix of this.managedClients.keys()) {
       if (fullName.startsWith(`${prefix}__`)) {
         return {
           prefix: prefix,
@@ -174,47 +236,36 @@ export class Router {
   }
 
   async start() {
-    console.log("AgentBrew Router starting...");
+    Logger.info("AgentBrew Router starting...");
     const packages = discoverPackages();
-    console.log(`Discovered ${packages.length} packages.`);
+    Logger.info(`Discovered ${packages.length} packages.`);
 
     for (const pkg of packages) {
-      await this.initializePackage(pkg);
+      this.registerPackage(pkg);
     }
 
     const transport = new StdioServerTransport();
     await this.mcpServer.connect(transport);
-    console.log("AgentBrew MCP Router connected via Stdio");
+    Logger.info("AgentBrew MCP Router connected via Stdio");
 
     return true;
   }
 
-  private async initializePackage(pkg: PackageInfo) {
+  private registerPackage(pkg: PackageInfo) {
     if (pkg.manifest.servers) {
       for (const server of pkg.manifest.servers) {
-        try {
-          const transport = new StdioClientTransport({
-            command: server.command,
-            args: server.args,
-            stderr: 'inherit',
-            cwd: pkg.path
-          });
-          const client = new Client({ name: "agentbrew-client", version: "1.0.0" }, { capabilities: {} });
-          await client.connect(transport);
-          this.clients.set(`${pkg.manifest.name}_${server.name}`, client);
-        } catch (e) {
-          console.error(`Failed to initialize server ${pkg.manifest.name}_${server.name}:`, e);
-        }
+        const prefix = `${pkg.manifest.name}_${server.name}`;
+        const managed = new ManagedClient(prefix, pkg.path, server);
+        this.managedClients.set(prefix, managed);
       }
     }
   }
 
   async stop() {
-    for (const [name, client] of this.clients) {
-      console.log(`Stopping client '${name}'...`);
-      await client.close();
+    for (const managed of this.managedClients.values()) {
+      await managed.stop();
     }
-    this.clients.clear();
+    this.managedClients.clear();
     await this.mcpServer.close();
   }
 }

@@ -1,4 +1,5 @@
 # AgentBrew 🍺
+*the name is inspired by homebrew*
 
 **Universal Package Manager & MCP Multiplexer for AI Agents.**
 
@@ -82,10 +83,17 @@ Run the following command:
 
 ## 🏗 Architecture
 - **CLI:** A single entry point for both human management and machine communication.
-- **Installer:** Handles cloning and isolated dependency resolution (`npm`, `pnpm`, `pip` + `venv`) with URL-based collision prevention.
+- **Installer:** Handles cloning and isolated dependency resolution (`npm`, `pnpm`, `pip` + `venv`) with URL-based collision prevention. Includes **build timeouts** (5 min) to ensure robustness.
 - **Registry:** Recursively discovers `agentbrew.toml` or `package.json` files up to 2 levels deep to support monorepos. Includes robust detection for Python entry points and Markdown skills.
 - **State Manager:** Remembers your enabled/disabled preferences in `~/.agentbrew/state.json`.
-- **MCP Router:** A dynamic proxy that connects to multiple child MCP servers via Stdio and aggregates their Tools, Prompts, and Resources into a single, unified interface. Supports graceful shutdown for clean resource management.
+- **MCP Router:** A high-performance dynamic proxy that aggregates multiple child MCP servers. Features **Just-In-Time (Lazy) Loading** to minimize memory overhead (servers are only spawned when requested) and **Optimized Resource Routing** for direct URI mapping. Supports graceful shutdown for clean resource management.
+
+## ✅ Current Status
+- **Core Multiplexer:** Stable and tested with Node.js and Python MCP servers.
+- **Lazy Loading:** Implemented. Processes are only spawned when a tool or resource is accessed.
+- **Resource Routing:** Optimized. URI mapping prevents broadcasting requests to irrelevant servers.
+- **Logging:** Professional `stderr` logging implemented for clean MCP communication.
+- **Testing:** Comprehensive test suite covering integration, routing, installation, and state management.
 
 ## 📄 License
 MIT

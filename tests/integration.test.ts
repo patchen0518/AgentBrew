@@ -35,7 +35,7 @@ args = ["ts-node", "${mockServerPath}"]
         fs.rmSync(TEST_HOME, { recursive: true, force: true });
     });
 
-    test('should list tools and call echo tool via daemon', async () => {
+    test('should list tools and call echo tool via router', async () => {
         const transport = new StdioClientTransport({
             command: 'npx',
             args: ['ts-node', path.join(__dirname, '../src/cli.ts')],

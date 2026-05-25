@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import * as toml from 'smol-toml';
 import { isPackageEnabled } from './state';
+import { Logger } from './logger';
 
 const BREW_ROOT = process.env.AGENTBREW_ROOT || path.join(os.homedir(), '.agentbrew');
 const PACKAGES_DIR = path.join(BREW_ROOT, 'packages');
@@ -43,7 +44,7 @@ export function discoverPackages(includeDisabled = false): PackageInfo[] {
     try {
         if (!fs.statSync(rootPath).isDirectory()) continue;
     } catch (e) {
-        console.error(`statSync failed for ${rootPath}:`, e);
+        Logger.error(`statSync failed for ${rootPath}:`, e);
         continue;
     }
 
@@ -75,7 +76,7 @@ function findManifests(currentPath: string, depth: number): { path: string, mani
             const content = fs.readFileSync(manifestPath, 'utf-8');
             results.push({ path: currentPath, manifest: toml.parse(content) as any });
         } catch (e) {
-            console.error(`Failed to parse ${manifestPath}:`, e);
+            Logger.error(`Failed to parse ${manifestPath}:`, e);
         }
     } else {
         const manifest = autoDetectManifest(currentPath);
@@ -139,7 +140,7 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
             }];
         }
     } catch (e) {
-        console.error(`Failed to parse ${packageJsonPath}:`, e);
+        Logger.error(`Failed to parse ${packageJsonPath}:`, e);
     }
   }
 
