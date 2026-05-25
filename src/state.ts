@@ -1,21 +1,18 @@
 // src/state.ts
 import fs from 'fs';
-import path from 'path';
-import os from 'os';
-
-const BREW_ROOT = process.env.AGENTBREW_ROOT || path.join(os.homedir(), '.agentbrew');
-const STATE_FILE = path.join(BREW_ROOT, 'state.json');
+import { getBrewRoot, getStateFile } from './config';
 
 export interface AgentBrewState {
   disabledPackages: string[];
 }
 
 export function loadState(): AgentBrewState {
-  if (!fs.existsSync(STATE_FILE)) {
+  const stateFile = getStateFile();
+  if (!fs.existsSync(stateFile)) {
     return { disabledPackages: [] };
   }
   try {
-    const data = fs.readFileSync(STATE_FILE, 'utf-8');
+    const data = fs.readFileSync(stateFile, 'utf-8');
     return JSON.parse(data) as AgentBrewState;
   } catch (err) {
     return { disabledPackages: [] };
@@ -23,10 +20,12 @@ export function loadState(): AgentBrewState {
 }
 
 export function saveState(state: AgentBrewState) {
-  if (!fs.existsSync(BREW_ROOT)) {
-    fs.mkdirSync(BREW_ROOT, { recursive: true });
+  const brewRoot = getBrewRoot();
+  const stateFile = getStateFile();
+  if (!fs.existsSync(brewRoot)) {
+    fs.mkdirSync(brewRoot, { recursive: true });
   }
-  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
+  fs.writeFileSync(stateFile, JSON.stringify(state, null, 2), 'utf-8');
 }
 
 export function enablePackage(pkgName: string) {

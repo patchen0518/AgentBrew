@@ -1,20 +1,20 @@
 import simpleGit from 'simple-git';
 import path from 'path';
 import fs from 'fs';
-import os from 'os';
 import crypto from 'crypto';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import * as toml from 'smol-toml';
 
 import { Logger } from './logger';
+import { PackageManifest } from './registry';
+import { getPackagesDir } from './config';
 
 const execAsync = promisify(exec);
 const readFileAsync = fs.promises.readFile;
+const writeFileAsync = fs.promises.writeFile;
 const mkdirAsync = fs.promises.mkdir;
 const rmAsync = fs.promises.rm;
-
-const BREW_ROOT = process.env.AGENTBREW_ROOT || path.join(os.homedir(), '.agentbrew');
-const PACKAGES_DIR = path.join(BREW_ROOT, 'packages');
 const INSTALL_TIMEOUT = 300000; // 5 minutes
 
 function redactUrl(url: string): string {
@@ -57,15 +57,16 @@ export async function installPackage(url: string) {
   const safeLogUrl = redactUrl(url);
 
   // Ensure directories exist
-  if (!fs.existsSync(PACKAGES_DIR)) {
-    await mkdirAsync(PACKAGES_DIR, { recursive: true });
+  const packagesDir = getPackagesDir();
+  if (!fs.existsSync(packagesDir)) {
+    await mkdirAsync(packagesDir, { recursive: true });
   }
 
   // Generate a unique name based on the URL to avoid collisions
   const urlHash = crypto.createHash('sha256').update(url).digest('hex').substring(0, 8);
   const repoName = url.split('/').pop()?.replace('.git', '') || 'pkg';
   const pkgDirName = `${repoName}-${urlHash}`;
-  const targetPath = path.join(PACKAGES_DIR, pkgDirName);
+  const targetPath = path.join(packagesDir, pkgDirName);
 
   if (fs.existsSync(targetPath)) {
     throw new Error(`Package from '${safeLogUrl}' is already installed at ${targetPath}`);
@@ -164,4 +165,47 @@ async function resolveDependencies(pkgPath: string) {
       await execAsync(`${pipPath} install -r requirements.txt`, execOpts);
     }
   }
+}
+
+export async function createLinkPackage(name: string, command: string, args: string[], env?: Record<string, string>) {
+  // Basic validation to prevent path traversal
+  if (name.includes('..') || name.includes('/') || name.includes('\\')) {
+    throw new Error("Invalid package name: name cannot contain path traversal characters.");
+  }
+
+  // Ensure PACKAGES_DIR exists
+  const packagesDir = getPackagesDir();
+  if (!fs.existsSync(packagesDir)) {
+    await mkdirAsync(packagesDir, { recursive: true });
+  }
+
+  // Generate a unique name based on the command and args to avoid collisions
+  const urlHash = crypto.createHash('sha256').update(command + args.join('')).digest('hex').substring(0, 8);
+  const pkgDirName = `linked-${name}-${urlHash}`;
+  const targetPath = path.join(packagesDir, pkgDirName);
+
+  if (fs.existsSync(targetPath)) {
+    throw new Error(`Linked package '${name}' is already installed at ${targetPath}`);
+  }
+
+  await mkdirAsync(targetPath, { recursive: true });
+
+  const manifest: PackageManifest = {
+    name: `linked-${name}`,
+    version: "1.0.0",
+    description: "Linked server migrated to AgentBrew",
+    servers: [
+      {
+        name,
+        command,
+        args,
+        description: `Linked server: ${name}`,
+        env: env && Object.keys(env).length > 0 ? env : undefined
+      }
+    ]
+  };
+
+  await writeFileAsync(path.join(targetPath, 'agentbrew.toml'), toml.stringify(manifest as any), 'utf-8');
+
+  return targetPath;
 }

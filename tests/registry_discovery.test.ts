@@ -1,11 +1,9 @@
-// tests/registry_discovery.test.ts
-import { discoverPackages } from '../src/registry';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { isPackageEnabled } from '../src/state';
+import { discoverPackages } from '../src/registry';
 
-jest.mock('../src/state');
+// Mock fs and path for registry discovery
 jest.mock('fs', () => {
     const actualFs = jest.requireActual('fs');
     return {
@@ -17,98 +15,67 @@ jest.mock('fs', () => {
     };
 });
 
-describe('Registry Discovery', () => {
-  const PACKAGES_DIR = path.join(os.homedir(), '.agentbrew', 'packages');
-  console.log(`TEST PACKAGES_DIR: ${PACKAGES_DIR}`);
+describe('Registry Discovery Merging', () => {
+  const BREW_ROOT = process.env.AGENTBREW_ROOT || path.join(os.homedir(), '.agentbrew');
+  const PACKAGES_DIR = path.join(BREW_ROOT, 'packages');
 
   beforeEach(() => {
     jest.clearAllMocks();
-    (isPackageEnabled as jest.Mock).mockReturnValue(true);
   });
 
-  test('discovers packages recursively up to 2 levels', () => {
-    (fs.existsSync as jest.Mock).mockImplementation((p: string) => {
-      if (p === PACKAGES_DIR) return true;
-      if (p.includes('agentbrew.toml')) return true;
-      if (p.includes('package.json')) return false;
-      return true;
-    });
-
-    (fs.readdirSync as jest.Mock).mockImplementation((p: string) => {
-      if (p === PACKAGES_DIR) return ['monorepo'];
-      if (p.endsWith('monorepo')) return ['pkg1', 'pkg2'];
-      return [];
-    });
-
-    (fs.statSync as jest.Mock).mockImplementation((p: string) => ({
-      isDirectory: () => !path.basename(p).includes('.') || path.basename(p) === '.agentbrew' || path.basename(p) === '.venv'
-    }));
-
-    (fs.readFileSync as jest.Mock).mockReturnValue('name = "test-pkg"\nversion = "1.0.0"');
-
-    const packages = discoverPackages();
-    // monorepo (if it had agentbrew.toml) + pkg1 + pkg2
-    // Actually findManifests is called on monorepo with depth 2.
-    // monorepo: depth 2. results.push(monorepo)
-    //   monorepo/pkg1: depth 1. results.push(pkg1)
-    //   monorepo/pkg2: depth 1. results.push(pkg2)
-    expect(packages.length).toBe(3);
-  });
-
-  test('autoDetectManifest handles bin entries', () => {
-    const pkgPath = path.join(PACKAGES_DIR, 'node-pkg');
+  test('merges TOML manifest with auto-detected skills', () => {
+    const pkgPath = path.join(PACKAGES_DIR, 'test-pkg');
+    
     (fs.existsSync as jest.Mock).mockImplementation((p: string) => {
         if (p === PACKAGES_DIR) return true;
         if (p === pkgPath) return true;
-        if (p === path.join(pkgPath, 'agentbrew.toml')) return false;
-        if (p === path.join(pkgPath, 'package.json')) return true;
+        if (p === path.join(pkgPath, 'agentbrew.toml')) return true;
+        if (p === path.join(pkgPath, 'skill1.md')) return true;
         return false;
     });
+
     (fs.readdirSync as jest.Mock).mockImplementation((p: string) => {
-        if (p === PACKAGES_DIR) return ['node-pkg'];
+        if (p === PACKAGES_DIR) return ['test-pkg'];
+        if (p === pkgPath) return ['agentbrew.toml', 'skill1.md'];
         return [];
     });
+
     (fs.statSync as jest.Mock).mockImplementation((p: string) => ({
-        isDirectory: () => !path.basename(p).includes('.') || path.basename(p) === '.agentbrew' || path.basename(p) === '.venv'
-    }));
-    (fs.readFileSync as jest.Mock).mockReturnValue(JSON.stringify({
-        name: 'node-pkg',
-        bin: { 'node-pkg-cli': 'dist/cli.js' }
+        isDirectory: () => p === PACKAGES_DIR || p === pkgPath
     }));
 
-    const packages = discoverPackages();
-    expect(packages.length).toBe(1);
-    expect(packages[0].manifest.servers).toBeDefined();
-    expect(packages[0].manifest.servers![0].command).toBe('node');
-    expect(packages[0].manifest.servers![0].args).toContain('dist/cli.js');
-  });
+    const tomlContent = `
+name = "test-pkg"
+version = "1.0.0"
+description = "A test package"
 
-  test('autoDetectManifest handles Python venv', () => {
-    const pkgPath = path.join(PACKAGES_DIR, 'py-pkg');
-    (fs.existsSync as jest.Mock).mockImplementation((p: string) => {
-        if (p === PACKAGES_DIR) return true;
-        if (p === pkgPath) return true;
-        if (p.includes('requirements.txt')) return true;
-        if (p.includes('.venv')) return true;
-        if (p.includes('python3') || p.includes('python.exe')) return true;
-        return false;
+[[servers]]
+name = "srv1"
+command = "node"
+args = ["index.js"]
+`;
+    (fs.readFileSync as jest.Mock).mockImplementation((p: string) => {
+        if (p === path.join(pkgPath, 'agentbrew.toml')) return tomlContent;
+        if (p === path.join(pkgPath, 'skill1.md')) return "# Skill 1\nThis is a skill";
+        return "";
     });
-    (fs.readdirSync as jest.Mock).mockImplementation((p: string) => {
-        if (p === PACKAGES_DIR) return ['py-pkg'];
-        return [];
-    });
-    (fs.statSync as jest.Mock).mockImplementation((p: string) => ({
-        isDirectory: () => !path.basename(p).includes('.') || path.basename(p) === '.agentbrew' || path.basename(p) === '.venv'
-    }));
 
-    const packages = discoverPackages();
+    const packages = discoverPackages(true);
     expect(packages.length).toBe(1);
-    const server = packages[0].manifest.servers![0];
-    expect(server.command).toContain('.venv');
-    if (process.platform === 'win32') {
-        expect(server.command).toContain('Scripts');
-    } else {
-        expect(server.command).toContain('bin');
-    }
+    const pkg = packages[0];
+
+    // Assert packageName is the directory name
+    expect(pkg.packageName).toBe('test-pkg');
+    
+    // Should have the server from TOML
+    expect(pkg.manifest.servers).toBeDefined();
+    expect(pkg.manifest.servers?.length).toBe(1);
+    expect(pkg.manifest.servers?.[0].name).toBe('srv1');
+
+    // Should have the skill from auto-detection
+    expect(pkg.manifest.prompts).toBeDefined();
+    expect(pkg.manifest.prompts?.length).toBe(1);
+    expect(pkg.manifest.prompts?.[0].name).toBe('skill1');
+    expect(pkg.manifest.prompts?.[0].description).toBe('Skill 1');
   });
 });

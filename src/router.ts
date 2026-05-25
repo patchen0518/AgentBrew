@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { discoverPackages, PackageInfo } from './registry';
+import { isPackageEnabled } from './state';
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -20,14 +21,14 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { Logger } from './logger';
 
-class ManagedClient {
+export class ManagedClient {
   private client: Client | null = null;
   private transport: StdioClientTransport | null = null;
 
   constructor(
     public prefix: string,
     private pkgPath: string,
-    private serverConfig: { command: string; args: string[] }
+    private serverConfig: { command: string; args: string[]; env?: Record<string, string> }
   ) {}
 
   async getClient(): Promise<Client> {
@@ -37,6 +38,7 @@ class ManagedClient {
     this.transport = new StdioClientTransport({
       command: this.serverConfig.command,
       args: this.serverConfig.args,
+      env: this.serverConfig.env,
       stderr: 'inherit',
       cwd: this.pkgPath,
     });
@@ -168,7 +170,11 @@ export class Router {
       // Check local prompts first
       const local = this.localPrompts.get(fullName);
       if (local) {
-        const fullPath = path.join(local.pkgPath, local.file);
+        const fullPath = path.resolve(local.pkgPath, local.file);
+        if (!fullPath.startsWith(path.resolve(local.pkgPath))) {
+          throw new Error(`Invalid prompt file path: ${local.file}`);
+        }
+        
         try {
           const content = fs.readFileSync(fullPath, 'utf-8');
           return {
@@ -294,10 +300,12 @@ export class Router {
   }
 
   private registerPackage(pkg: PackageInfo) {
+    const pkgId = pkg.packageName || pkg.manifest.name;
     // Register executable servers
     if (pkg.manifest.servers) {
       for (const server of pkg.manifest.servers) {
-        const prefix = `${pkg.manifest.name}_${server.name}`;
+        if (!isPackageEnabled(pkgId, server.name)) continue;
+        const prefix = `${pkgId}_${server.name}`;
         const managed = new ManagedClient(prefix, pkg.path, server);
         this.managedClients.set(prefix, managed);
       }
@@ -306,7 +314,8 @@ export class Router {
     // Register local markdown prompts
     if (pkg.manifest.prompts) {
       for (const prompt of pkg.manifest.prompts) {
-        const prefix = `${pkg.manifest.name}__${prompt.name}`;
+        if (!isPackageEnabled(pkgId, prompt.name)) continue;
+        const prefix = `${pkgId}__${prompt.name}`;
         this.localPrompts.set(prefix, {
           pkgPath: pkg.path,
           file: prompt.file,

@@ -1,12 +1,9 @@
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import * as toml from 'smol-toml';
 import { isPackageEnabled } from './state';
 import { Logger } from './logger';
-
-const BREW_ROOT = process.env.AGENTBREW_ROOT || path.join(os.homedir(), '.agentbrew');
-const PACKAGES_DIR = path.join(BREW_ROOT, 'packages');
+import { getPackagesDir } from './config';
 
 
 export interface PackageManifest {
@@ -17,7 +14,9 @@ export interface PackageManifest {
     name: string;
     command: string;
     args: string[];
+    description?: string;
     build_command?: string;
+    env?: Record<string, string>;
   }[];
   prompts?: {
     name: string;
@@ -27,20 +26,22 @@ export interface PackageManifest {
 }
 
 export interface PackageInfo {
+  packageName: string;
   path: string;
   manifest: PackageManifest;
   isEnabled: boolean;
 }
 
 export function discoverPackages(includeDisabled = false): PackageInfo[] {
-  if (!fs.existsSync(PACKAGES_DIR)) return [];
+  const packagesDir = getPackagesDir();
+  if (!fs.existsSync(packagesDir)) return [];
 
   const packages: PackageInfo[] = [];
-  const rootDirs = fs.readdirSync(PACKAGES_DIR);
+  const rootDirs = fs.readdirSync(packagesDir);
   
 
   for (const rootDir of rootDirs) {
-    const rootPath = path.join(PACKAGES_DIR, rootDir);
+    const rootPath = path.join(packagesDir, rootDir);
     try {
         if (!fs.statSync(rootPath).isDirectory()) continue;
     } catch (e) {
@@ -51,9 +52,14 @@ export function discoverPackages(includeDisabled = false): PackageInfo[] {
     // Recursive search up to 2 levels
     const manifests = findManifests(rootPath, 2);
     for (const manifestInfo of manifests) {
-        const isEnabled = isPackageEnabled(manifestInfo.manifest.name);
+        const isEnabled = isPackageEnabled(rootDir, manifestInfo.manifest.name);
         if (isEnabled || includeDisabled) {
-            packages.push({ path: manifestInfo.path, manifest: manifestInfo.manifest, isEnabled });
+            packages.push({
+                packageName: rootDir,
+                path: manifestInfo.path,
+                manifest: manifestInfo.manifest,
+                isEnabled
+            });
         }
     }
   }
@@ -69,20 +75,43 @@ function findManifests(currentPath: string, depth: number): { path: string, mani
     const packageJsonPath = path.join(currentPath, 'package.json');
     const requirementsPath = path.join(currentPath, 'requirements.txt');
     
-    
+    let manifest: PackageManifest | null = null;
 
     if (fs.existsSync(manifestPath)) {
         try {
             const content = fs.readFileSync(manifestPath, 'utf-8');
-            results.push({ path: currentPath, manifest: toml.parse(content) as any });
+            manifest = toml.parse(content) as any;
         } catch (e) {
             Logger.error(`Failed to parse ${manifestPath}:`, e);
         }
+    }
+
+    const autoManifest = autoDetectManifest(currentPath);
+
+    if (manifest) {
+        // Merge auto-detected into explicit manifest
+        // TOML takes precedence for same-named items
+        if (autoManifest.servers) {
+            manifest.servers = manifest.servers || [];
+            for (const autoSrv of autoManifest.servers) {
+                if (!manifest.servers.find(s => s.name === autoSrv.name)) {
+                    manifest.servers.push(autoSrv);
+                }
+            }
+        }
+        if (autoManifest.prompts) {
+            manifest.prompts = manifest.prompts || [];
+            for (const autoPrompt of autoManifest.prompts) {
+                if (!manifest.prompts.find(p => p.name === autoPrompt.name)) {
+                    manifest.prompts.push(autoPrompt);
+                }
+            }
+        }
+        results.push({ path: currentPath, manifest });
     } else {
-        const manifest = autoDetectManifest(currentPath);
         // Only include auto-detected if it found something useful (servers or prompts)
-        if (fs.existsSync(packageJsonPath) || fs.existsSync(requirementsPath) || (manifest.prompts && manifest.prompts.length > 0)) {
-            results.push({ path: currentPath, manifest });
+        if (fs.existsSync(packageJsonPath) || fs.existsSync(requirementsPath) || (autoManifest.prompts && autoManifest.prompts.length > 0)) {
+            results.push({ path: currentPath, manifest: autoManifest });
         }
     }
 
@@ -130,13 +159,15 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
             manifest.servers = [{
                 name: binName,
                 command: 'node',
-                args: [binPath]
+                args: [binPath],
+                description: `Node.js server from ${binName}`
             }];
         } else if (pkgJson.scripts?.start) {
             manifest.servers = [{
                 name: manifest.name,
                 command: 'npm',
-                args: ['start']
+                args: ['start'],
+                description: `npm start server for ${manifest.name}`
             }];
         }
     } catch (e) {
@@ -169,7 +200,8 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
     manifest.servers.push({
       name: `${manifest.name}-python`,
       command: pythonCmd,
-      args: [entryPoint]
+      args: [entryPoint],
+      description: `Python server from ${entryPoint}`
     });
   }
 
@@ -180,11 +212,20 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
     if (mdFiles.length > 0) {
         manifest.prompts = manifest.prompts || [];
         for (const file of mdFiles) {
-        manifest.prompts.push({
-            name: path.parse(file).name,
-            file: file,
-            description: `Markdown skill: ${file}`
-        });
+            let description = `Markdown skill: ${file}`;
+            try {
+                const firstLines = fs.readFileSync(path.join(pkgPath, file), 'utf-8').split('\n');
+                const firstNonEmpty = firstLines.find(l => l.trim().length > 0);
+                if (firstNonEmpty) {
+                    description = firstNonEmpty.replace(/^#+\s*/, '').trim();
+                }
+            } catch (e) {}
+
+            manifest.prompts.push({
+                name: path.parse(file).name,
+                file: file,
+                description: description
+            });
         }
     }
   } catch (e) {

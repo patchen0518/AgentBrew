@@ -57,6 +57,17 @@ Install any compatible tool or skill directly from a Git URL:
 agentbrew install https://github.com/organization/my-awesome-tool
 ```
 
+### Migrating from other Agents
+If you already have MCP servers or skills configured in Gemini CLI, Claude Code, or Cursor, you can import them automatically:
+```bash
+agentbrew migrate
+```
+- **Discovery:** Scans `~/.gemini`, `~/.claude`, and Cursor config folders.
+- **Link Packages:** For local scripts or binaries, AgentBrew creates a "link" without moving your files.
+- **Git Re-install:** For remote plugins, AgentBrew can automatically re-install them from their Git source for better isolation.
+- **Skill Import:** Automatically symlinks Markdown skills into the AgentBrew registry.
+- **Dry Run:** Use `agentbrew migrate --dry-run` to see what would be migrated without making changes.
+
 ### Managing Packages
 ```bash
 # List all installed packages and their status
@@ -78,7 +89,7 @@ AgentBrew uses a JIT (Just-In-Time) execution model. You don't need to start it 
 > **Note on JIT Persistence:** Because AgentBrew spawns MCP servers on-demand and terminates them when the agent session ends, any **in-memory state** within a child server will be lost between sessions. Servers must persist data to disk (e.g., in their own configuration folders or databases) to maintain state across restarts.
 
 ### For Gemini CLI
-Add this to your configuration:
+Add this to your configuration (usually in `~/.gemini/settings.json`):
 ```json
 "mcpServers": {
   "agentbrew": {
@@ -86,6 +97,12 @@ Add this to your configuration:
   }
 }
 ```
+Or use the CLI command:
+```bash
+gemini mcp add agentbrew agentbrew
+```
+
+> **Note on Disabling:** Due to a known issue in some versions of the Gemini CLI, the `gemini mcp disable agentbrew` command may return an error ("Server not found"). If you need to stop using AgentBrew, use `gemini mcp remove agentbrew` instead.
 
 ### For Claude Code
 Run the following command:
@@ -106,6 +123,8 @@ Run the following command:
 
 ## ✅ Current Status
 - **Core Multiplexer:** Stable and tested with Node.js and Python MCP servers.
+- **Migration Engine:** Implemented. Supports automated discovery and transfer from Gemini CLI, Claude Code, and Cursor.
+- **Link Packages:** Supported. Allows managing local tools without moving them.
 - **Lazy Loading:** Implemented. Processes are only spawned when a tool or resource is accessed.
 - **Resource Routing:** Optimized. URI mapping prevents broadcasting requests to irrelevant servers.
 - **Logging:** Professional `stderr` logging implemented for clean MCP communication.
