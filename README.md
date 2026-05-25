@@ -5,6 +5,16 @@
 
 AgentBrew solves the fragmentation in the AI agent ecosystem by acting as a single, unified bridge between different AI agents (like Claude Code, Gemini CLI, or Codex) and their tools, MCP servers, and skills.
 
+## ⚠️ Security Warning
+
+**CRITICAL SECURITY RISK: USE WITH CAUTION**
+
+AgentBrew is designed to install and execute code from arbitrary third-party Git repositories. **Currently, AgentBrew does not provide any sandboxing or isolation.**
+
+*   **Full Host Access:** Installed packages and their dependencies run with the same privileges as the user running AgentBrew. They have full access to your filesystem, environment variables, and network.
+*   **Remote Code Execution (RCE):** The installation process automatically executes build scripts (e.g., `npm install`, `pip install`). A malicious repository can execute arbitrary code on your machine the moment you run `agentbrew install`.
+*   **Trust Requirement:** **ONLY install packages from sources you completely trust.** Never install packages from unknown or untrusted URLs.
+
 ## 🚀 The Problem
 Every AI agent currently has its own way of installing and managing plugins, skills, and tools. This makes it difficult for developers to share their tools across different platforms and for users to manage a coherent set of capabilities for their agents.
 
