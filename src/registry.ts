@@ -4,7 +4,8 @@ import * as toml from 'smol-toml';
 import { isPackageEnabled } from './state';
 import { Logger } from './logger';
 import { getPackagesDir } from './config';
-
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 export interface PackageManifest {
   name: string;
@@ -25,11 +26,70 @@ export interface PackageManifest {
   }[];
 }
 
+/**
+ * Static cache of capabilities discovered from an MCP server.
+ * Saved as mcp-manifest.json in the package directory.
+ */
+export interface McpManifestCache extends PackageManifest {
+  discovered?: {
+    tools?: Record<string, any[]>;     // serverName -> Tool[]
+    prompts?: Record<string, any[]>;   // serverName -> Prompt[]
+    resources?: Record<string, any[]>; // serverName -> Resource[]
+  }
+}
+
 export interface PackageInfo {
   packageName: string;
   path: string;
   manifest: PackageManifest;
   isEnabled: boolean;
+}
+
+/**
+ * Discovers capabilities by briefly running the server and saves them to mcp-manifest.json.
+ */
+export async function generateMcpManifest(pkgPath: string, manifest: PackageManifest): Promise<McpManifestCache> {
+    const cache: McpManifestCache = { ...manifest, discovered: { tools: {}, prompts: {}, resources: {} } };
+    
+    if (manifest.servers) {
+        for (const server of manifest.servers) {
+            Logger.info(`Discovering capabilities for server: ${server.name}...`);
+            const transport = new StdioClientTransport({
+                command: server.command,
+                args: server.args,
+                env: server.env,
+                cwd: pkgPath,
+                stderr: 'inherit'
+            });
+
+            const client = new Client(
+                { name: "agentbrew-discovery", version: "1.0.0" },
+                { capabilities: {} }
+            );
+
+            try {
+                await client.connect(transport);
+                
+                const tools = await client.listTools();
+                const prompts = await client.listPrompts();
+                const resources = await client.listResources();
+
+                if (cache.discovered) {
+                    cache.discovered.tools![server.name] = tools.tools;
+                    cache.discovered.prompts![server.name] = prompts.prompts;
+                    cache.discovered.resources![server.name] = resources.resources;
+                }
+
+                await client.close();
+            } catch (e: any) {
+                Logger.error(`Failed to discover capabilities for ${server.name}: ${e.message}`);
+            }
+        }
+    }
+
+    const cachePath = path.join(pkgPath, 'mcp-manifest.json');
+    fs.writeFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
+    return cache;
 }
 
 export function discoverPackages(includeDisabled = false): PackageInfo[] {
@@ -67,10 +127,21 @@ export function discoverPackages(includeDisabled = false): PackageInfo[] {
   return packages;
 }
 
-function findManifests(currentPath: string, depth: number): { path: string, manifest: PackageManifest }[] {
+export function findManifests(currentPath: string, depth: number): { path: string, manifest: PackageManifest }[] {
     const results: { path: string, manifest: PackageManifest }[] = [];
     
-    // Check current dir
+    // Check for cached manifest first
+    const cachePath = path.join(currentPath, 'mcp-manifest.json');
+    if (fs.existsSync(cachePath)) {
+        try {
+            const manifest = JSON.parse(fs.readFileSync(cachePath, 'utf-8')) as McpManifestCache;
+            results.push({ path: currentPath, manifest });
+            return results; // If cache exists, we trust it and stop here for this path
+        } catch (e) {
+            Logger.error(`Failed to parse cache ${cachePath}:`, e);
+        }
+    }
+
     const manifestPath = path.join(currentPath, 'agentbrew.toml');
     const packageJsonPath = path.join(currentPath, 'package.json');
     const requirementsPath = path.join(currentPath, 'requirements.txt');
@@ -152,6 +223,9 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
         manifest.version = pkgJson.version || '0.0.0-auto';
         manifest.description = pkgJson.description || "";
         
+        const hasMcpSdk = pkgJson.dependencies?.['@modelcontextprotocol/sdk'] || 
+                         pkgJson.devDependencies?.['@modelcontextprotocol/sdk'];
+
         // Improved auto-detection for bin entries
         if (pkgJson.bin) {
             const binName = typeof pkgJson.bin === 'string' ? manifest.name : Object.keys(pkgJson.bin)[0];
@@ -162,13 +236,26 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
                 args: [binPath],
                 description: `Node.js server from ${binName}`
             }];
-        } else if (pkgJson.scripts?.start) {
-            manifest.servers = [{
-                name: manifest.name,
-                command: 'npm',
-                args: ['start'],
-                description: `npm start server for ${manifest.name}`
-            }];
+        } else if (hasMcpSdk) {
+            // If it has MCP SDK but no bin, try common patterns
+            const commonNodeEntryPoints = ['dist/index.js', 'dist/server.js', 'index.js', 'server.js'];
+            const entryPoint = commonNodeEntryPoints.find(f => fs.existsSync(path.join(pkgPath, f)));
+            
+            if (entryPoint) {
+                manifest.servers = [{
+                    name: manifest.name,
+                    command: 'node',
+                    args: [entryPoint],
+                    description: `Detected Node.js MCP server`
+                }];
+            } else if (pkgJson.scripts?.start) {
+                manifest.servers = [{
+                    name: manifest.name,
+                    command: 'npm',
+                    args: ['start'],
+                    description: `npm start server for ${manifest.name}`
+                }];
+            }
         }
     } catch (e) {
         Logger.error(`Failed to parse ${packageJsonPath}:`, e);
@@ -177,32 +264,46 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
 
   // Detect Python projects
   const requirementsPath = path.join(pkgPath, 'requirements.txt');
-  if (fs.existsSync(requirementsPath)) {
-    manifest.servers = manifest.servers || [];
-    
-    // Check for local .venv
-    let pythonCmd = 'python3';
-    const venvDir = '.venv';
-    const venvPath = path.join(pkgPath, venvDir);
-    if (fs.existsSync(venvPath)) {
-        const venvPython = process.platform === 'win32' 
-            ? path.join(venvPath, 'Scripts', 'python.exe')
-            : path.join(venvPath, 'bin', 'python3');
-        if (fs.existsSync(venvPython)) {
-            pythonCmd = venvPython;
-        }
+  const pyprojectPath = path.join(pkgPath, 'pyproject.toml');
+  
+  if (fs.existsSync(requirementsPath) || fs.existsSync(pyprojectPath)) {
+    let isMcp = false;
+    if (fs.existsSync(requirementsPath)) {
+        const reqs = fs.readFileSync(requirementsPath, 'utf-8');
+        if (reqs.includes('mcp')) isMcp = true;
+    }
+    if (fs.existsSync(pyprojectPath)) {
+        const pyproj = fs.readFileSync(pyprojectPath, 'utf-8');
+        if (pyproj.includes('mcp')) isMcp = true;
     }
 
-    // Improved entry point detection
-    const commonEntryPoints = ['mcp_server.py', 'server.py', 'app.py', 'main.py'];
-    const entryPoint = commonEntryPoints.find(f => fs.existsSync(path.join(pkgPath, f))) || 'main.py';
+    if (isMcp) {
+        manifest.servers = manifest.servers || [];
+        
+        // Check for local .venv
+        let pythonCmd = 'python3';
+        const venvDir = '.venv';
+        const venvPath = path.join(pkgPath, venvDir);
+        if (fs.existsSync(venvPath)) {
+            const venvPython = process.platform === 'win32' 
+                ? path.join(venvPath, 'Scripts', 'python.exe')
+                : path.join(venvPath, 'bin', 'python3');
+            if (fs.existsSync(venvPython)) {
+                pythonCmd = venvPython;
+            }
+        }
 
-    manifest.servers.push({
-      name: `${manifest.name}-python`,
-      command: pythonCmd,
-      args: [entryPoint],
-      description: `Python server from ${entryPoint}`
-    });
+        // Improved entry point detection
+        const commonEntryPoints = ['src/mcp_server.py', 'src/server.py', 'mcp_server.py', 'server.py', 'app.py', 'main.py'];
+        const entryPoint = commonEntryPoints.find(f => fs.existsSync(path.join(pkgPath, f))) || 'main.py';
+
+        manifest.servers.push({
+          name: `${manifest.name}-python`,
+          command: pythonCmd,
+          args: [entryPoint],
+          description: `Python server from ${entryPoint}`
+        });
+    }
   }
 
   // Detect Markdown skills

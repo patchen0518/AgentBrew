@@ -1,13 +1,12 @@
 import simpleGit from 'simple-git';
 import path from 'path';
 import fs from 'fs';
-import crypto from 'crypto';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as toml from 'smol-toml';
 
 import { Logger } from './logger';
-import { PackageManifest } from './registry';
+import { PackageManifest, generateMcpManifest, findManifests } from './registry';
 import { getPackagesDir } from './config';
 
 const execAsync = promisify(exec);
@@ -28,6 +27,31 @@ function redactUrl(url: string): string {
     // If not a standard URL, use regex as fallback
     return url.replace(/([^:]+):([^@]+)@/, '$1:****@');
   }
+}
+
+/**
+ * Sanitizes Git URLs by removing prefixes like 'git+' and fragments.
+ */
+function sanitizeGitUrl(url: string): string {
+  let sanitized = url.trim();
+  
+  // Remove git+ prefix (common in package.json)
+  if (sanitized.startsWith('git+')) {
+    sanitized = sanitized.substring(4);
+  }
+  
+  // Remove .git suffix for consistency if it's a standard URL
+  if (sanitized.endsWith('.git')) {
+    sanitized = sanitized.substring(0, sanitized.length - 4);
+  }
+
+  // Remove fragments (e.g., #main)
+  const fragmentIndex = sanitized.indexOf('#');
+  if (fragmentIndex !== -1) {
+    sanitized = sanitized.substring(0, fragmentIndex);
+  }
+
+  return sanitized;
 }
 
 function validateUrl(url: string) {
@@ -53,8 +77,9 @@ function validateUrl(url: string) {
 }
 
 export async function installPackage(url: string) {
-  validateUrl(url);
-  const safeLogUrl = redactUrl(url);
+  const sanitizedUrl = sanitizeGitUrl(url);
+  validateUrl(sanitizedUrl);
+  const safeLogUrl = redactUrl(sanitizedUrl);
 
   // Ensure directories exist
   const packagesDir = getPackagesDir();
@@ -62,23 +87,27 @@ export async function installPackage(url: string) {
     await mkdirAsync(packagesDir, { recursive: true });
   }
 
-  // Generate a unique name based on the URL to avoid collisions
-  const urlHash = crypto.createHash('sha256').update(url).digest('hex').substring(0, 8);
-  const repoName = url.split('/').pop()?.replace('.git', '') || 'pkg';
-  const pkgDirName = `${repoName}-${urlHash}`;
-  const targetPath = path.join(packagesDir, pkgDirName);
+  // Enforce strict uniqueness: use the repo name as the directory name
+  const repoName = sanitizedUrl.split('/').pop()?.split(':').pop()?.replace('.git', '') || 'pkg';
+  const targetPath = path.join(packagesDir, repoName);
 
   if (fs.existsSync(targetPath)) {
-    throw new Error(`Package from '${safeLogUrl}' is already installed at ${targetPath}`);
+    throw new Error(`Package '${repoName}' is already installed at ${targetPath}. Uninstall it first to install a different version.`);
   }
 
   const git = simpleGit().env({ ...process.env, GIT_TERMINAL_PROMPT: '0' });
   try {
     Logger.info(`Cloning ${safeLogUrl} into ${targetPath}...`);
-    await git.clone(url, targetPath);
+    await git.clone(sanitizedUrl, targetPath);
     
     // Post-install dependency resolution
     await resolveDependencies(targetPath);
+
+    // Generate discovery cache
+    const manifests = findManifests(targetPath, 2);
+    for (const m of manifests) {
+        await generateMcpManifest(m.path, m.manifest);
+    }
     
     return targetPath;
   } catch (error: any) {
@@ -179,9 +208,8 @@ export async function createLinkPackage(name: string, command: string, args: str
     await mkdirAsync(packagesDir, { recursive: true });
   }
 
-  // Generate a unique name based on the command and args to avoid collisions
-  const urlHash = crypto.createHash('sha256').update(command + args.join('')).digest('hex').substring(0, 8);
-  const pkgDirName = `linked-${name}-${urlHash}`;
+  // Enforce strict uniqueness: use the name as the directory name
+  const pkgDirName = `linked-${name}`;
   const targetPath = path.join(packagesDir, pkgDirName);
 
   if (fs.existsSync(targetPath)) {
@@ -206,6 +234,9 @@ export async function createLinkPackage(name: string, command: string, args: str
   };
 
   await writeFileAsync(path.join(targetPath, 'agentbrew.toml'), toml.stringify(manifest as any), 'utf-8');
+
+  // Generate discovery cache
+  await generateMcpManifest(targetPath, manifest);
 
   return targetPath;
 }

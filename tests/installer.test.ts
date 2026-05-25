@@ -4,15 +4,17 @@ import { exec } from 'child_process';
 import simpleGit from 'simple-git';
 import fs from 'fs';
 import path from 'path';
-import crypto from 'crypto';
+import * as registry from '../src/registry';
 
 jest.mock('child_process');
 jest.mock('simple-git');
+jest.mock('../src/registry');
 jest.mock('fs', () => {
     const actualFs = jest.requireActual('fs');
     return {
         ...actualFs,
         existsSync: jest.fn(),
+        writeFileSync: jest.fn(),
         promises: {
             ...actualFs.promises,
             readFile: jest.fn(),
@@ -23,11 +25,9 @@ jest.mock('fs', () => {
 });
 
 function getExpectedPath(url: string) {
-    const urlHash = crypto.createHash('sha256').update(url).digest('hex').substring(0, 8);
     const repoName = url.split('/').pop()?.replace('.git', '') || 'pkg';
-    const pkgDirName = `${repoName}-${urlHash}`;
     const brewRoot = path.join(process.env.HOME || '', '.agentbrew');
-    return path.join(brewRoot, 'packages', pkgDirName);
+    return path.join(brewRoot, 'packages', repoName);
 }
 
 describe('Installer', () => {
@@ -51,6 +51,9 @@ describe('Installer', () => {
             callback(null, { stdout: '', stderr: '' });
         }
     });
+
+    (registry.findManifests as jest.Mock).mockReturnValue([]);
+    (registry.generateMcpManifest as jest.Mock).mockResolvedValue({});
   });
 
   test('calls npm install and build when package.json exists', async () => {
@@ -68,11 +71,16 @@ describe('Installer', () => {
         scripts: { build: 'tsc' }
     }));
 
+    (registry.findManifests as jest.Mock).mockReturnValue([
+        { path: targetPath, manifest: { name: 'repo', version: '1.0.0' } }
+    ]);
+
     await installPackage(url);
 
-    expect(mockClone).toHaveBeenCalledWith(url, targetPath);
+    expect(mockClone).toHaveBeenCalledWith('https://github.com/user/repo', targetPath);
     expect(mockExec).toHaveBeenCalledWith('npm install', expect.objectContaining({ cwd: targetPath }), expect.any(Function));
     expect(mockExec).toHaveBeenCalledWith('npm run build', expect.objectContaining({ cwd: targetPath }), expect.any(Function));
+    expect(registry.generateMcpManifest).toHaveBeenCalled();
   });
 
   test('calls pnpm install and pnpm run build when pnpm-lock.yaml and package.json with build exist', async () => {
@@ -91,9 +99,13 @@ describe('Installer', () => {
         scripts: { build: 'vite build' }
     }));
 
+    (registry.findManifests as jest.Mock).mockReturnValue([
+        { path: targetPath, manifest: { name: 'pnpmrepo', version: '1.0.0' } }
+    ]);
+
     await installPackage(url);
 
-    expect(mockClone).toHaveBeenCalledWith(url, targetPath);
+    expect(mockClone).toHaveBeenCalledWith('https://github.com/user/pnpmrepo', targetPath);
     expect(mockExec).toHaveBeenCalledWith('pnpm install', expect.objectContaining({ cwd: targetPath }), expect.any(Function));
     expect(mockExec).toHaveBeenCalledWith('pnpm run build', expect.objectContaining({ cwd: targetPath }), expect.any(Function));
   });
@@ -111,7 +123,7 @@ describe('Installer', () => {
 
     await installPackage(url);
 
-    expect(mockClone).toHaveBeenCalledWith(url, targetPath);
+    expect(mockClone).toHaveBeenCalledWith('https://github.com/user/pyrepo-uv', targetPath);
     expect(mockExec).toHaveBeenCalledWith('uv --version', { timeout: 2000 }, expect.any(Function));
     expect(mockExec).toHaveBeenCalledWith('uv venv .venv', expect.objectContaining({ cwd: targetPath }), expect.any(Function));
     expect(mockExec).toHaveBeenCalledWith('uv pip install -r requirements.txt', expect.objectContaining({ cwd: targetPath }), expect.any(Function));

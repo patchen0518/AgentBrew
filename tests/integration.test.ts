@@ -27,6 +27,38 @@ command = "npx"
 args = ["ts-node", "${mockServerPath}"]
 `;
         fs.writeFileSync(path.join(pkgDir, 'agentbrew.toml'), tomlContent);
+
+        // Pre-generate the mcp-manifest.json as the router now uses lazy discovery from cache
+        const manifestCache = {
+            name: "mock-pkg",
+            version: "1.0.0",
+            servers: [
+                {
+                    name: "echo-server",
+                    command: "npx",
+                    args: ["ts-node", mockServerPath]
+                }
+            ],
+            discovered: {
+                tools: {
+                    "echo-server": [
+                        {
+                            name: "echo",
+                            description: "Echoes input",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    msg: { type: "string" }
+                                }
+                            }
+                        }
+                    ]
+                },
+                prompts: {},
+                resources: {}
+            }
+        };
+        fs.writeFileSync(path.join(pkgDir, 'mcp-manifest.json'), JSON.stringify(manifestCache, null, 2));
     });
 
     afterAll(async () => {

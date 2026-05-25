@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { discoverPackages, PackageInfo } from './registry';
+import { discoverPackages, PackageInfo, McpManifestCache } from './registry';
 import { isPackageEnabled } from './state';
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -79,6 +79,10 @@ export class Router {
   private resourceToClient: Map<string, string> = new Map();
   private mcpServer: Server;
 
+  private cachedTools: Map<string, Tool[]> = new Map();
+  private cachedPrompts: Map<string, Prompt[]> = new Map();
+  private cachedResources: Map<string, Resource[]> = new Map();
+
   constructor() {
     this.mcpServer = new Server(
       {
@@ -100,23 +104,12 @@ export class Router {
   private setupMcpHandlers() {
     this.mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
       const allTools: Tool[] = [];
-      const promises = Array.from(this.managedClients.values()).map(async (managed) => {
-        try {
-          const client = await managed.getClient();
-          const response = await client.listTools();
-          return response.tools.map(tool => ({
-            ...tool,
-            name: `${managed.prefix}__${tool.name}`
-          }));
-        } catch (e) {
-          Logger.error(`Failed to list tools for ${managed.prefix}:`, e);
-          return [];
-        }
-      });
       
-      const results = await Promise.all(promises);
-      for (const tools of results) {
-        allTools.push(...tools);
+      for (const [prefix, tools] of this.cachedTools.entries()) {
+          allTools.push(...tools.map(tool => ({
+              ...tool,
+              name: `${prefix}__${tool.name}`
+          })));
       }
       return { tools: allTools };
     });
@@ -147,20 +140,12 @@ export class Router {
         });
       }
 
-      const promises = Array.from(this.managedClients.values()).map(async (managed) => {
-        try {
-          const client = await managed.getClient();
-          const response = await client.listPrompts();
-          return response.prompts.map(prompt => ({
+      for (const [prefix, prompts] of this.cachedPrompts.entries()) {
+        allPrompts.push(...prompts.map(prompt => ({
             ...prompt,
-            name: `${managed.prefix}__${prompt.name}`
-          }));
-        } catch (e) {
-          return [];
-        }
-      });
-      const results = await Promise.all(promises);
-      results.forEach(p => allPrompts.push(...p));
+            name: `${prefix}__${prompt.name}`
+        })));
+      }
       return { prompts: allPrompts };
     });
 
@@ -205,24 +190,15 @@ export class Router {
     // Resources
     this.mcpServer.setRequestHandler(ListResourcesRequestSchema, async () => {
       const allResources: Resource[] = [];
-      const promises = Array.from(this.managedClients.values()).map(async (managed) => {
-        try {
-          const client = await managed.getClient();
-          const response = await client.listResources();
-          return response.resources.map(resource => {
-            // Resource routing: track which client owns this URI
-            this.resourceToClient.set(resource.uri, managed.prefix);
-            return {
-              ...resource,
-              name: `${managed.prefix}__${resource.name}`
-            };
-          });
-        } catch (e) {
-          return [];
-        }
-      });
-      const results = await Promise.all(promises);
-      results.forEach(r => allResources.push(...r));
+      for (const [prefix, resources] of this.cachedResources.entries()) {
+          allResources.push(...resources.map(resource => {
+              this.resourceToClient.set(resource.uri, prefix);
+              return {
+                  ...resource,
+                  name: `${prefix}__${resource.name}`
+              };
+          }));
+      }
       return { resources: allResources };
     });
 
@@ -238,35 +214,12 @@ export class Router {
         }
       }
 
-      // Fallback to broadcast if URI wasn't discovered or prefix is missing
-      Logger.warn(`URI ${uri} not found in cache, falling back to broadcast`);
-      for (const managed of this.managedClients.values()) {
-        try {
-          const client = await managed.getClient();
-          return await client.readResource({ uri });
-        } catch (e) {
-          // Continue to next client
-        }
-      }
       throw new Error(`Resource not found: ${uri}`);
     });
 
     this.mcpServer.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
       const allTemplates: ResourceTemplate[] = [];
-      const promises = Array.from(this.managedClients.values()).map(async (managed) => {
-        try {
-          const client = await managed.getClient();
-          const response = await client.listResourceTemplates();
-          return response.resourceTemplates.map(template => ({
-            ...template,
-            name: `${managed.prefix}__${template.name}`
-          }));
-        } catch (e) {
-          return [];
-        }
-      });
-      const results = await Promise.all(promises);
-      results.forEach(t => allTemplates.push(...t));
+      // (Lazy loading for templates can be added if needed, currently focusing on core tools/prompts)
       return { resourceTemplates: allTemplates };
     });
   }
@@ -301,13 +254,30 @@ export class Router {
 
   private registerPackage(pkg: PackageInfo) {
     const pkgId = pkg.packageName || pkg.manifest.name;
+    const cache = pkg.manifest as McpManifestCache;
+
     // Register executable servers
     if (pkg.manifest.servers) {
       for (const server of pkg.manifest.servers) {
         if (!isPackageEnabled(pkgId, server.name)) continue;
+        
+        // Use prefix: pkgName_serverName
         const prefix = `${pkgId}_${server.name}`;
         const managed = new ManagedClient(prefix, pkg.path, server);
         this.managedClients.set(prefix, managed);
+
+        // Load from cache
+        if (cache.discovered) {
+            if (cache.discovered.tools?.[server.name]) {
+                this.cachedTools.set(prefix, cache.discovered.tools[server.name]);
+            }
+            if (cache.discovered.prompts?.[server.name]) {
+                this.cachedPrompts.set(prefix, cache.discovered.prompts[server.name]);
+            }
+            if (cache.discovered.resources?.[server.name]) {
+                this.cachedResources.set(prefix, cache.discovered.resources[server.name]);
+            }
+        }
       }
     }
 

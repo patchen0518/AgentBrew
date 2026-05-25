@@ -1,14 +1,16 @@
 import fs from 'fs';
 import path from 'path';
-import crypto from 'crypto';
 import os from 'os';
 import { createLinkPackage } from '../src/installer';
+import * as registry from '../src/registry';
 
+jest.mock('../src/registry');
 jest.mock('fs', () => {
     const actualFs = jest.requireActual('fs');
     return {
         ...actualFs,
         existsSync: jest.fn(),
+        writeFileSync: jest.fn(),
         promises: {
             ...actualFs.promises,
             writeFile: jest.fn().mockResolvedValue(undefined),
@@ -24,6 +26,7 @@ describe('createLinkPackage', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (fs.existsSync as jest.Mock).mockReturnValue(false);
+    (registry.generateMcpManifest as jest.Mock).mockResolvedValue({});
   });
 
   test('creates a link package with correct structure and TOML content', async () => {
@@ -32,8 +35,7 @@ describe('createLinkPackage', () => {
     const args = ['index.js'];
     const env = { KEY: 'VALUE' };
 
-    const urlHash = crypto.createHash('sha256').update(command + args.join('')).digest('hex').substring(0, 8);
-    const expectedDirName = `linked-${name}-${urlHash}`;
+    const expectedDirName = `linked-${name}`;
     const expectedPath = path.join(PACKAGES_DIR, expectedDirName);
 
     const resultPath = await createLinkPackage(name, command, args, env);
@@ -42,20 +44,6 @@ describe('createLinkPackage', () => {
     expect(fs.promises.mkdir).toHaveBeenCalledWith(PACKAGES_DIR, { recursive: true });
     expect(fs.promises.mkdir).toHaveBeenCalledWith(expectedPath, { recursive: true });
     
-    const expectedToml = `name = "linked-${name}"
-version = "1.0.0"
-description = "Linked server migrated to AgentBrew"
-
-[[servers]]
-name = "${name}"
-command = "${command}"
-args = ["${args[0]}"]
-description = "Linked server: ${name}"
-
-[servers.env]
-KEY = "VALUE"
-`;
-
     expect(fs.promises.writeFile).toHaveBeenCalledWith(
       path.join(expectedPath, 'agentbrew.toml'),
       expect.stringContaining(`name = "${name}"`),
@@ -66,6 +54,7 @@ KEY = "VALUE"
       expect.stringContaining(`command = "${command}"`),
       'utf-8'
     );
+    expect(registry.generateMcpManifest).toHaveBeenCalled();
   });
 
   test('handles optional env', async () => {
@@ -73,8 +62,7 @@ KEY = "VALUE"
     const command = 'python';
     const args = ['main.py'];
 
-    const urlHash = crypto.createHash('sha256').update(command + args.join('')).digest('hex').substring(0, 8);
-    const expectedDirName = `linked-${name}-${urlHash}`;
+    const expectedDirName = `linked-${name}`;
     const expectedPath = path.join(PACKAGES_DIR, expectedDirName);
 
     await createLinkPackage(name, command, args);
@@ -91,7 +79,10 @@ KEY = "VALUE"
     const command = 'node';
     const args = ['app.js'];
 
-    (fs.existsSync as jest.Mock).mockReturnValue(true);
+    (fs.existsSync as jest.Mock).mockImplementation((p) => {
+        if (p.includes('linked-existing-server')) return true;
+        return false;
+    });
 
     await expect(createLinkPackage(name, command, args))
       .rejects.toThrow(/already installed/);
