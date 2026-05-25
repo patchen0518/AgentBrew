@@ -83,7 +83,7 @@ describe('Router Tool Routing', () => {
       }
     };
 
-    await expect(callToolHandler(request)).rejects.toThrow("Invalid name format or unknown prefix");
+    await expect(callToolHandler(request)).rejects.toThrow("Invalid name format: invalidtoolname");
   });
 
   test('throws error for missing client', async () => {
@@ -97,7 +97,7 @@ describe('Router Tool Routing', () => {
       }
     };
 
-    await expect(callToolHandler(request)).rejects.toThrow("Invalid name format or unknown prefix");
+    await expect(callToolHandler(request)).rejects.toThrow("Unknown prefix: unknown-pkg_server");
   });
 
   test('successfully routes tool names containing underscores', async () => {

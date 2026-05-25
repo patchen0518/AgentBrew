@@ -76,6 +76,16 @@ function validateUrl(url: string) {
   }
 }
 
+function validateName(name: string, context: string) {
+  if (name.includes('__')) {
+    throw new Error(
+      `Invalid ${context} name: '${name}'.\n` +
+      `The sequence '__' is reserved as a routing delimiter by AgentBrew.\n` +
+      `Please rename the ${context} to proceed.`
+    );
+  }
+}
+
 export async function installPackage(url: string) {
   const sanitizedUrl = sanitizeGitUrl(url);
   validateUrl(sanitizedUrl);
@@ -89,6 +99,7 @@ export async function installPackage(url: string) {
 
   // Enforce strict uniqueness: use the repo name as the directory name
   const repoName = sanitizedUrl.split('/').pop()?.split(':').pop()?.replace('.git', '') || 'pkg';
+  validateName(repoName, 'package');
   const targetPath = path.join(packagesDir, repoName);
 
   if (fs.existsSync(targetPath)) {
@@ -106,6 +117,17 @@ export async function installPackage(url: string) {
     // Generate discovery cache
     const manifests = findManifests(targetPath, 2);
     for (const m of manifests) {
+        // Validate names in the manifest
+        if (m.manifest.servers) {
+            for (const srv of m.manifest.servers) {
+                validateName(srv.name, 'server');
+            }
+        }
+        if (m.manifest.prompts) {
+            for (const prompt of m.manifest.prompts) {
+                validateName(prompt.name, 'prompt');
+            }
+        }
         await generateMcpManifest(m.path, m.manifest);
     }
     
@@ -197,6 +219,7 @@ async function resolveDependencies(pkgPath: string) {
 }
 
 export async function createLinkPackage(name: string, command: string, args: string[], env?: Record<string, string>) {
+  validateName(name, 'package');
   // Basic validation to prevent path traversal
   if (name.includes('..') || name.includes('/') || name.includes('\\')) {
     throw new Error("Invalid package name: name cannot contain path traversal characters.");

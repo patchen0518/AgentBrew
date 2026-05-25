@@ -56,12 +56,21 @@ agentbrew migrate
 # List all connected tools and their status
 agentbrew list
 
+# Refresh the capability cache (use after manual git pulls)
+agentbrew refresh
+
 # Disable a specific tool
 agentbrew disable my-awesome-tool
 
 # "Unplug" a package completely
 agentbrew uninstall my-awesome-tool
 ```
+
+## 🛠 Best Practices & Naming
+- **Avoid Reserved Delimiters:** Package, server, and skill names must **not** contain the sequence `__`. This sequence is used by AgentBrew to route requests.
+- **Skill Organization:** To prevent documentation clutter, AgentBrew only auto-loads `.md` files as prompts if they are located inside `skills/` or `prompts/` directories.
+- **Instruction Files:** `GEMINI.md` and `CLAUDE.md` files are automatically registered as MCP Resources. AgentBrew provides a special prompt called `agentbrew__instruction_index` that lists all available instruction resources. You can instruct your agent to read this index to discover how to use your tools.
+- **Manual Updates:** If you manually modify a package directory (e.g., by running `git pull`), you must run `agentbrew refresh` to update the capability cache.
 
 ## 🤖 Connecting your AI Agents
 Configure your AI agent to launch `agentbrew` as its MCP server.

@@ -24,6 +24,10 @@ export interface PackageManifest {
     file: string;
     description: string;
   }[];
+  instructions?: {
+    name: string;
+    file: string;
+  }[];
 }
 
 /**
@@ -40,7 +44,8 @@ export interface McpManifestCache extends PackageManifest {
 
 export interface PackageInfo {
   packageName: string;
-  path: string;
+  subPath: string; // Relative path from packagesDir/packageName
+  path: string;    // Absolute path
   manifest: PackageManifest;
   isEnabled: boolean;
 }
@@ -112,10 +117,12 @@ export function discoverPackages(includeDisabled = false): PackageInfo[] {
     // Recursive search up to 2 levels
     const manifests = findManifests(rootPath, 2);
     for (const manifestInfo of manifests) {
+        const subPath = path.relative(rootPath, manifestInfo.path);
         const isEnabled = isPackageEnabled(rootDir, manifestInfo.manifest.name);
         if (isEnabled || includeDisabled) {
             packages.push({
                 packageName: rootDir,
+                subPath: subPath,
                 path: manifestInfo.path,
                 manifest: manifestInfo.manifest,
                 isEnabled
@@ -130,38 +137,37 @@ export function discoverPackages(includeDisabled = false): PackageInfo[] {
 export function findManifests(currentPath: string, depth: number): { path: string, manifest: PackageManifest }[] {
     const results: { path: string, manifest: PackageManifest }[] = [];
     
+    let manifest: PackageManifest | null = null;
+    let foundCache = false;
+
     // Check for cached manifest first
     const cachePath = path.join(currentPath, 'mcp-manifest.json');
     if (fs.existsSync(cachePath)) {
         try {
-            const manifest = JSON.parse(fs.readFileSync(cachePath, 'utf-8')) as McpManifestCache;
-            results.push({ path: currentPath, manifest });
-            return results; // If cache exists, we trust it and stop here for this path
+            manifest = JSON.parse(fs.readFileSync(cachePath, 'utf-8')) as McpManifestCache;
+            foundCache = true;
         } catch (e) {
             Logger.error(`Failed to parse cache ${cachePath}:`, e);
         }
     }
 
-    const manifestPath = path.join(currentPath, 'agentbrew.toml');
-    const packageJsonPath = path.join(currentPath, 'package.json');
-    const requirementsPath = path.join(currentPath, 'requirements.txt');
-    
-    let manifest: PackageManifest | null = null;
-
-    if (fs.existsSync(manifestPath)) {
-        try {
-            const content = fs.readFileSync(manifestPath, 'utf-8');
-            manifest = toml.parse(content) as any;
-        } catch (e) {
-            Logger.error(`Failed to parse ${manifestPath}:`, e);
+    if (!manifest) {
+        const manifestPath = path.join(currentPath, 'agentbrew.toml');
+        if (fs.existsSync(manifestPath)) {
+            try {
+                const content = fs.readFileSync(manifestPath, 'utf-8');
+                manifest = toml.parse(content) as any;
+            } catch (e) {
+                Logger.error(`Failed to parse ${manifestPath}:`, e);
+            }
         }
     }
 
     const autoManifest = autoDetectManifest(currentPath);
 
     if (manifest) {
-        // Merge auto-detected into explicit manifest
-        // TOML takes precedence for same-named items
+        // Merge auto-detected into explicit manifest or cache
+        // Explicit/Cache takes precedence for same-named items
         if (autoManifest.servers) {
             manifest.servers = manifest.servers || [];
             for (const autoSrv of autoManifest.servers) {
@@ -178,14 +184,27 @@ export function findManifests(currentPath: string, depth: number): { path: strin
                 }
             }
         }
+        if (autoManifest.instructions) {
+            manifest.instructions = manifest.instructions || [];
+            for (const autoInstr of autoManifest.instructions) {
+                if (!manifest.instructions.find(i => i.name === autoInstr.name)) {
+                    manifest.instructions.push(autoInstr);
+                }
+            }
+        }
         results.push({ path: currentPath, manifest });
     } else {
-        // Only include auto-detected if it found something useful (servers or prompts)
-        if (fs.existsSync(packageJsonPath) || fs.existsSync(requirementsPath) || (autoManifest.prompts && autoManifest.prompts.length > 0)) {
+        // Only include auto-detected if it found something useful
+        if (fs.existsSync(path.join(currentPath, 'package.json')) || 
+            fs.existsSync(path.join(currentPath, 'requirements.txt')) || 
+            (autoManifest.prompts && autoManifest.prompts.length > 0) ||
+            (autoManifest.instructions && autoManifest.instructions.length > 0)) {
             results.push({ path: currentPath, manifest: autoManifest });
         }
     }
 
+    // Continue recursion even if we found a manifest at this level, 
+    // to find skills in subdirectories.
     if (depth > 0) {
         try {
             const files = fs.readdirSync(currentPath);
@@ -306,31 +325,54 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
     }
   }
 
-  // Detect Markdown skills
-  try {
-    const files = fs.readdirSync(pkgPath);
-    const mdFiles = files.filter((f: string) => f.endsWith('.md') && f.toLowerCase() !== 'readme.md');
-    if (mdFiles.length > 0) {
-        manifest.prompts = manifest.prompts || [];
-        for (const file of mdFiles) {
-            let description = `Markdown skill: ${file}`;
-            try {
-                const firstLines = fs.readFileSync(path.join(pkgPath, file), 'utf-8').split('\n');
-                const firstNonEmpty = firstLines.find(l => l.trim().length > 0);
-                if (firstNonEmpty) {
-                    description = firstNonEmpty.replace(/^#+\s*/, '').trim();
-                }
-            } catch (e) {}
-
-            manifest.prompts.push({
-                name: path.parse(file).name,
-                file: file,
-                description: description
-            });
-        }
+  // Detect instruction files (GEMINI.md, CLAUDE.md)
+  const instructionFiles = ['GEMINI.md', 'CLAUDE.md'];
+  for (const file of instructionFiles) {
+    const filePath = path.join(pkgPath, file);
+    if (fs.existsSync(filePath)) {
+      manifest.instructions = manifest.instructions || [];
+      manifest.instructions.push({
+        name: path.parse(file).name,
+        file: file
+      });
     }
-  } catch (e) {
-      // Ignore
+  }
+
+  // Detect Markdown skills (only in skills/ or prompts/ directories)
+  const dirName = path.basename(pkgPath).toLowerCase();
+  const isSkillDir = dirName === 'skills' || dirName === 'prompts';
+
+  if (isSkillDir) {
+    try {
+      const files = fs.readdirSync(pkgPath);
+      const mdFiles = files.filter((f: string) => 
+        f.endsWith('.md') && 
+        !instructionFiles.includes(f.toUpperCase()) && 
+        f.toLowerCase() !== 'readme.md'
+      );
+      
+      if (mdFiles.length > 0) {
+          manifest.prompts = manifest.prompts || [];
+          for (const file of mdFiles) {
+              let description = `Markdown skill: ${file}`;
+              try {
+                  const firstLines = fs.readFileSync(path.join(pkgPath, file), 'utf-8').split('\n');
+                  const firstNonEmpty = firstLines.find(l => l.trim().length > 0);
+                  if (firstNonEmpty) {
+                      description = firstNonEmpty.replace(/^#+\s*/, '').trim();
+                  }
+              } catch (e) {}
+
+              manifest.prompts.push({
+                  name: path.parse(file).name,
+                  file: file,
+                  description: description
+              });
+          }
+      }
+    } catch (e) {
+        // Ignore
+    }
   }
 
   return manifest;

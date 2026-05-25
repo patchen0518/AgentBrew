@@ -10,6 +10,7 @@ jest.mock('fs', () => ({
   existsSync: jest.fn(),
   mkdirSync: jest.fn(),
   writeFileSync: jest.fn(),
+  copyFileSync: jest.fn(),
   symlinkSync: jest.fn(),
   readFileSync: jest.fn(),
   readdirSync: jest.fn(),
@@ -151,7 +152,7 @@ describe('runMigration', () => {
     const migratedSkillsDir = path.join(brewRoot, 'packages', 'migrated-skills');
     expect(fs.mkdirSync).toHaveBeenCalledWith(migratedSkillsDir, { recursive: true });
     expect(fs.writeFileSync).toHaveBeenCalledWith(path.join(migratedSkillsDir, 'agentbrew.toml'), expect.any(String), 'utf-8');
-    expect(fs.symlinkSync).toHaveBeenCalledWith(skillFile, path.join(migratedSkillsDir, 'test-skill.md'));
+    expect(fs.copyFileSync).toHaveBeenCalledWith(skillFile, path.join(migratedSkillsDir, 'test-skill.md'));
     expect(Logger.info).toHaveBeenCalledWith(expect.stringContaining('Successfully migrated skill: test-skill'));
   });
 });

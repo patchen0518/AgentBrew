@@ -25,23 +25,26 @@ describe('Registry Discovery Merging', () => {
 
   test('merges TOML manifest with auto-detected skills', () => {
     const pkgPath = path.join(PACKAGES_DIR, 'test-pkg');
+    const skillsPath = path.join(pkgPath, 'skills');
     
     (fs.existsSync as jest.Mock).mockImplementation((p: string) => {
         if (p === PACKAGES_DIR) return true;
         if (p === pkgPath) return true;
+        if (p === skillsPath) return true;
         if (p === path.join(pkgPath, 'agentbrew.toml')) return true;
-        if (p === path.join(pkgPath, 'skill1.md')) return true;
+        if (p === path.join(skillsPath, 'skill1.md')) return true;
         return false;
     });
 
     (fs.readdirSync as jest.Mock).mockImplementation((p: string) => {
         if (p === PACKAGES_DIR) return ['test-pkg'];
-        if (p === pkgPath) return ['agentbrew.toml', 'skill1.md'];
+        if (p === pkgPath) return ['agentbrew.toml', 'skills'];
+        if (p === skillsPath) return ['skill1.md'];
         return [];
     });
 
     (fs.statSync as jest.Mock).mockImplementation((p: string) => ({
-        isDirectory: () => p === PACKAGES_DIR || p === pkgPath
+        isDirectory: () => p === PACKAGES_DIR || p === pkgPath || p === skillsPath
     }));
 
     const tomlContent = `
@@ -56,26 +59,26 @@ args = ["index.js"]
 `;
     (fs.readFileSync as jest.Mock).mockImplementation((p: string) => {
         if (p === path.join(pkgPath, 'agentbrew.toml')) return tomlContent;
-        if (p === path.join(pkgPath, 'skill1.md')) return "# Skill 1\nThis is a skill";
+        if (p === path.join(skillsPath, 'skill1.md')) return "# Skill 1\nThis is a skill";
         return "";
     });
 
     const packages = discoverPackages(true);
-    expect(packages.length).toBe(1);
-    const pkg = packages[0];
-
-    // Assert packageName is the directory name
-    expect(pkg.packageName).toBe('test-pkg');
+    expect(packages.length).toBe(2);
     
-    // Should have the server from TOML
-    expect(pkg.manifest.servers).toBeDefined();
-    expect(pkg.manifest.servers?.length).toBe(1);
-    expect(pkg.manifest.servers?.[0].name).toBe('srv1');
+    // Package 1: root with servers
+    const pkg1 = packages.find(p => p.subPath === '');
+    expect(pkg1).toBeDefined();
+    expect(pkg1?.manifest.servers).toBeDefined();
+    expect(pkg1?.manifest.servers?.length).toBe(1);
+    expect(pkg1?.manifest.servers?.[0].name).toBe('srv1');
 
-    // Should have the skill from auto-detection
-    expect(pkg.manifest.prompts).toBeDefined();
-    expect(pkg.manifest.prompts?.length).toBe(1);
-    expect(pkg.manifest.prompts?.[0].name).toBe('skill1');
-    expect(pkg.manifest.prompts?.[0].description).toBe('Skill 1');
+    // Package 2: skills subdirectory with prompts
+    const pkg2 = packages.find(p => p.subPath === 'skills');
+    expect(pkg2).toBeDefined();
+    expect(pkg2?.manifest.prompts).toBeDefined();
+    expect(pkg2?.manifest.prompts?.length).toBe(1);
+    expect(pkg2?.manifest.prompts?.[0].name).toBe('skill1');
+    expect(pkg2?.manifest.prompts?.[0].description).toBe('Skill 1');
   });
 });

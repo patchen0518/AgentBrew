@@ -73,10 +73,16 @@ interface LocalPrompt {
   description: string;
 }
 
+interface LocalResource {
+  pkgPath: string;
+  file: string;
+}
+
 export class Router {
   private managedClients: Map<string, ManagedClient> = new Map();
   private localPrompts: Map<string, LocalPrompt> = new Map();
-  private resourceToClient: Map<string, string> = new Map();
+  private localResources: Map<string, LocalResource> = new Map();
+  private resourceToClient: Map<string, { prefix: string, originalUri: string }> = new Map();
   private mcpServer: Server;
 
   private cachedTools: Map<string, Tool[]> = new Map();
@@ -132,6 +138,14 @@ export class Router {
     this.mcpServer.setRequestHandler(ListPromptsRequestSchema, async () => {
       const allPrompts: Prompt[] = [];
 
+      // Add instruction index prompt
+      if (this.localResources.size > 0) {
+        allPrompts.push({
+          name: 'agentbrew__instruction_index',
+          description: 'Index of instruction files (GEMINI.md, CLAUDE.md) for all installed tools.'
+        });
+      }
+
       // Add local prompts
       for (const [prefix, local] of this.localPrompts.entries()) {
         allPrompts.push({
@@ -151,6 +165,25 @@ export class Router {
 
     this.mcpServer.setRequestHandler(GetPromptRequestSchema, async (request) => {
       const fullName = request.params.name;
+
+      if (fullName === 'agentbrew__instruction_index') {
+        let content = "The following instruction files are available as resources in AgentBrew:\n\n";
+        for (const [uri, resource] of this.localResources.entries()) {
+          content += `- ${resource.file} for ${path.basename(resource.pkgPath)}: ${uri}\n`;
+        }
+        content += "\nYou can read these resources to get specific instructions for each tool.";
+        
+        return {
+          description: "Index of instruction files",
+          messages: [{
+            role: 'user',
+            content: {
+              type: 'text',
+              text: content
+            }
+          }]
+        };
+      }
 
       // Check local prompts first
       const local = this.localPrompts.get(fullName);
@@ -190,11 +223,23 @@ export class Router {
     // Resources
     this.mcpServer.setRequestHandler(ListResourcesRequestSchema, async () => {
       const allResources: Resource[] = [];
+
+      // Add local instruction resources
+      for (const [uri, local] of this.localResources.entries()) {
+        allResources.push({
+          uri,
+          name: `${path.basename(local.pkgPath)} instructions (${local.file})`,
+          description: `Instruction file for ${path.basename(local.pkgPath)}`
+        });
+      }
+
       for (const [prefix, resources] of this.cachedResources.entries()) {
           allResources.push(...resources.map(resource => {
-              this.resourceToClient.set(resource.uri, prefix);
+              const scopedUri = this.scopeUri(prefix, resource.uri);
+              this.resourceToClient.set(scopedUri, { prefix, originalUri: resource.uri });
               return {
                   ...resource,
+                  uri: scopedUri,
                   name: `${prefix}__${resource.name}`
               };
           }));
@@ -204,13 +249,32 @@ export class Router {
 
     this.mcpServer.setRequestHandler(ReadResourceRequestSchema, async (request) => {
       const uri = request.params.uri;
-      const prefix = this.resourceToClient.get(uri);
+
+      // Check local instruction resources
+      const local = this.localResources.get(uri);
+      if (local) {
+        const fullPath = path.resolve(local.pkgPath, local.file);
+        try {
+          const content = fs.readFileSync(fullPath, 'utf-8');
+          return {
+            contents: [{
+              uri,
+              mimeType: 'text/markdown',
+              text: content
+            }]
+          };
+        } catch (e) {
+          throw new Error(`Failed to read instruction file: ${local.file}`);
+        }
+      }
+
+      const mapping = this.resourceToClient.get(uri);
       
-      if (prefix) {
-        const managed = this.managedClients.get(prefix);
+      if (mapping) {
+        const managed = this.managedClients.get(mapping.prefix);
         if (managed) {
           const client = await managed.getClient();
-          return await client.readResource({ uri });
+          return await client.readResource({ uri: mapping.originalUri });
         }
       }
 
@@ -224,16 +288,33 @@ export class Router {
     });
   }
 
-  private parseName(fullName: string): { prefix: string, name: string } {
-    for (const prefix of this.managedClients.keys()) {
-      if (fullName.startsWith(`${prefix}__`)) {
-        return {
-          prefix: prefix,
-          name: fullName.substring(prefix.length + 2)
-        };
-      }
+  private scopeUri(prefix: string, uri: string): string {
+    // If it's a standard MCP URI, inject prefix into authority or path
+    // Simple approach: agentbrew://prefix/original_scheme/rest_of_uri
+    try {
+        const url = new URL(uri);
+        return `mcp://${prefix}/${url.protocol.replace(':', '')}/${url.host}${url.pathname}${url.search}`;
+    } catch (e) {
+        // Fallback for non-standard URIs
+        return `mcp://${prefix}/raw/${uri}`;
     }
-    throw new Error(`Invalid name format or unknown prefix: ${fullName}`);
+  }
+
+  private parseName(fullName: string): { prefix: string, name: string } {
+    const delimiter = '__';
+    const lastIndex = fullName.lastIndexOf(delimiter);
+    if (lastIndex === -1) {
+        throw new Error(`Invalid name format: ${fullName}. Expected 'prefix${delimiter}name'`);
+    }
+
+    const prefix = fullName.substring(0, lastIndex);
+    const name = fullName.substring(lastIndex + delimiter.length);
+
+    if (!this.managedClients.has(prefix) && !this.localPrompts.has(fullName)) {
+        throw new Error(`Unknown prefix: ${prefix} for name: ${fullName}`);
+    }
+
+    return { prefix, name };
   }
 
   async start() {
@@ -253,16 +334,22 @@ export class Router {
   }
 
   private registerPackage(pkg: PackageInfo) {
-    const pkgId = pkg.packageName || pkg.manifest.name;
+    // Unique ID for the package + sub-project
+    // e.g. "my-repo" or "my-repo/sub-dir"
+    const pkgId = pkg.subPath ? `${pkg.packageName}/${pkg.subPath}` : pkg.packageName;
     const cache = pkg.manifest as McpManifestCache;
 
     // Register executable servers
     if (pkg.manifest.servers) {
       for (const server of pkg.manifest.servers) {
-        if (!isPackageEnabled(pkgId, server.name)) continue;
+        // Use the logical ID for checking enablement
+        if (!isPackageEnabled(pkg.packageName, server.name)) continue;
         
-        // Use prefix: pkgName_serverName
-        const prefix = `${pkgId}_${server.name}`;
+        // Use prefix: pkgId_serverName
+        // Replace slashes with underscores for valid MCP names if needed, 
+        // but let's keep it consistent with the logic we have.
+        const sanitizedPkgId = pkgId.replace(/\//g, '_').replace(/\\/g, '_');
+        const prefix = `${sanitizedPkgId}_${server.name}`;
         const managed = new ManagedClient(prefix, pkg.path, server);
         this.managedClients.set(prefix, managed);
 
@@ -275,9 +362,28 @@ export class Router {
                 this.cachedPrompts.set(prefix, cache.discovered.prompts[server.name]);
             }
             if (cache.discovered.resources?.[server.name]) {
-                this.cachedResources.set(prefix, cache.discovered.resources[server.name]);
+                const resources = cache.discovered.resources[server.name];
+                this.cachedResources.set(prefix, resources);
+                
+                // ISSUE 1 FIX: Populate resource mapping from cache on startup
+                for (const resource of resources) {
+                    const scopedUri = this.scopeUri(prefix, resource.uri);
+                    this.resourceToClient.set(scopedUri, { prefix, originalUri: resource.uri });
+                }
             }
         }
+      }
+    }
+
+    // Register local instruction resources
+    if (pkg.manifest.instructions) {
+      for (const instruction of pkg.manifest.instructions) {
+        const pkgId = pkg.subPath ? `${pkg.packageName}/${pkg.subPath}` : pkg.packageName;
+        const uri = `mcp://agentbrew/instructions/${pkgId}/${instruction.file}`;
+        this.localResources.set(uri, {
+          pkgPath: pkg.path,
+          file: instruction.file
+        });
       }
     }
 

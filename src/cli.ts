@@ -4,7 +4,7 @@ import { Command } from 'commander';
 import { installPackage } from './installer';
 import { startRouter, ManagedClient } from './router';
 import { enablePackage, disablePackage, isPackageEnabled } from './state';
-import { discoverPackages, PackageInfo } from './registry';
+import { discoverPackages, PackageInfo, findManifests, generateMcpManifest } from './registry';
 import { runMigration, discoverExternalConfigs } from './migration';
 import fs from 'fs';
 import path from 'path';
@@ -34,6 +34,32 @@ program
 
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
+  });
+
+program
+  .command('refresh')
+  .description('Refresh the capability cache for all installed packages')
+  .action(async () => {
+    const packages = discoverPackages(true);
+    if (packages.length === 0) {
+      Logger.info("No packages to refresh.");
+      return;
+    }
+
+    // Use a Set to avoid double-refreshing sub-projects in the same package
+    const refreshedPaths = new Set<string>();
+
+    for (const pkg of packages) {
+      if (refreshedPaths.has(pkg.path)) continue;
+      
+      Logger.info(`Refreshing cache for ${pkg.packageName}...`);
+      const manifests = findManifests(pkg.path, 2);
+      for (const m of manifests) {
+        await generateMcpManifest(m.path, m.manifest);
+      }
+      refreshedPaths.add(pkg.path);
+    }
+    Logger.info("Refresh complete.");
   });
 
 program

@@ -24,6 +24,8 @@ describe('ManagedClient Environment Support', () => {
     // Access private managedClients to inject our test client
     // @ts-ignore
     router.registerPackage({
+      packageName: 'test-pkg',
+      subPath: '',
       path: pkgPath,
       manifest: {
         name: 'test-pkg',

@@ -98,11 +98,16 @@ export async function runMigration() {
 
       const targetPath = path.join(migratedSkillsDir, targetFileName);
       if (!fs.existsSync(targetPath)) {
-        fs.symlinkSync(skill.path, targetPath);
-        Logger.info(`Successfully migrated skill: ${skill.name} (${skill.path})`);
+        fs.copyFileSync(skill.path, targetPath);
+        Logger.info(`Successfully migrated skill: ${skill.name} (copied from ${skill.path})`);
       } else {
         // Skip silently or log if already exists
       }
+    }
+    
+    if (result.skills.length > 0) {
+      Logger.info("\nNote: AgentBrew has made a copy of the migrated skills in its own directory.");
+      Logger.info("The original files still exist. You can safely remove them if you only plan to use them via AgentBrew.");
     }
   } catch (e: any) {
     Logger.error(`Migration failed: ${e.message}`);
