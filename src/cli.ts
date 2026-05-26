@@ -2,6 +2,7 @@
 // src/cli.ts
 import { Command } from 'commander';
 import { installPackage } from './installer';
+import { updatePackage, updateAllPackages } from './updater';
 import { startRouter, ManagedClient } from './router';
 import { enablePackage, disablePackage, isPackageEnabled } from './state';
 import { discoverPackages, PackageInfo, findManifests, generateMcpManifest } from './registry';
@@ -72,6 +73,27 @@ program
       Logger.info(`Successfully installed package from ${url}`);
     } catch (error: any) {
       Logger.error(`Failed to install package: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('update')
+  .description('Update installed packages from their remote repositories')
+  .argument('[packageName]', 'Name of the package to update')
+  .option('--all', 'Update all installed packages')
+  .action(async (packageName, options) => {
+    try {
+      if (options.all) {
+        await updateAllPackages();
+      } else if (packageName) {
+        await updatePackage(packageName);
+      } else {
+        Logger.error("Please specify a package name or use --all");
+        process.exit(1);
+      }
+    } catch (error: any) {
+      Logger.error(error.message);
       process.exit(1);
     }
   });
