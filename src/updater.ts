@@ -31,8 +31,13 @@ export async function updatePackage(packageName: string): Promise<boolean> {
   await git.fetch();
   
   const status = await git.status();
-  if (!status.isClean()) {
-    throw new Error('Local changes detected.');
+  const hasModifiedTrackedFiles = 
+    (status.modified && status.modified.length > 0) || 
+    (status.deleted && status.deleted.length > 0) || 
+    (status.staged && status.staged.length > 0);
+
+  if (hasModifiedTrackedFiles) {
+    throw new Error('Local changes detected in tracked files.');
   }
 
   const localHead = await git.revparse(['HEAD']);

@@ -71,6 +71,43 @@ describe('Router and ManagedClient', () => {
       expect(StdioClientTransport).toHaveBeenCalledTimes(2);
     });
 
+    test('ManagedClient handles concurrent getClient calls during retry delay without duplicate spawns', async () => {
+      const mockTransport = {
+        onclose: null as any,
+      };
+      (StdioClientTransport as jest.Mock).mockImplementation(() => mockTransport);
+
+      const mockClient = {
+        connect: jest.fn().mockResolvedValue(undefined),
+        close: jest.fn().mockResolvedValue(undefined),
+      };
+      (Client as jest.Mock).mockImplementation(() => mockClient);
+
+      const managed = new ManagedClient('test-concurrent', '/tmp', { command: 'node', args: [] });
+      
+      // Connect once
+      await managed.getClient();
+      expect(StdioClientTransport).toHaveBeenCalledTimes(1);
+
+      // Simulate crash
+      mockTransport.onclose();
+      
+      // Now the state is RETRYING, and a timer is scheduled for 2s.
+      // Call getClient() immediately while it is waiting in the retry delay.
+      const getClientPromise = managed.getClient();
+
+      // Advance timers by 2s to execute the retry reconnect logic
+      jest.advanceTimersByTime(2000);
+
+      // Await the connection
+      const clientInstance = await getClientPromise;
+      expect(clientInstance).toBeDefined();
+
+      // Ensure that StdioClientTransport was only called 2 times in total (1 initial + 1 retry),
+      // and NOT 3 times (which would happen if the concurrent call bypassed the delay and spawned its own).
+      expect(StdioClientTransport).toHaveBeenCalledTimes(2);
+    });
+
     test('ManagedClient fails after max retries', async () => {
       const mockTransport = {
         onclose: null as any,

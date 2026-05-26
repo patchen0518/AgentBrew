@@ -44,6 +44,38 @@ export class ManagedClient {
     private serverConfig: { command: string; args: string[]; env?: Record<string, string> }
   ) {}
 
+  private async spawnClient(wasRetrying: boolean): Promise<Client> {
+    Logger.info(`Starting MCP server for ${this.prefix}...`);
+    this.transport = new StdioClientTransport({
+      command: this.serverConfig.command,
+      args: this.serverConfig.args,
+      env: this.serverConfig.env,
+      stderr: 'inherit',
+      cwd: this.pkgPath,
+    });
+
+    this.client = new Client(
+      { name: "agentbrew-client", version: "1.0.0" },
+      { capabilities: {} }
+    );
+
+    await this.client.connect(this.transport);
+    
+    this.status = ClientStatus.CONNECTED;
+    if (!wasRetrying) {
+      this.retryCount = 0;
+    }
+
+    // Add exit handler:
+    this.transport.onclose = () => {
+      if (this.status !== ClientStatus.DISCONNECTED) {
+          this.handleCrash();
+      }
+    };
+
+    return this.client;
+  }
+
   async getClient(): Promise<Client> {
     if (this.status === ClientStatus.FAILED) {
       throw new Error(`[AgentBrew] Server '${this.prefix}' failed after ${this.maxRetries} attempts. Last error: ${this.lastError}`);
@@ -51,40 +83,11 @@ export class ManagedClient {
     if (this.client && this.status === ClientStatus.CONNECTED) return this.client;
     if (this.connectingPromise) return this.connectingPromise;
 
-    const wasRetrying = this.status === ClientStatus.RETRYING;
     this.status = ClientStatus.CONNECTING;
 
     this.connectingPromise = (async () => {
       try {
-        Logger.info(`Starting MCP server for ${this.prefix}...`);
-        this.transport = new StdioClientTransport({
-          command: this.serverConfig.command,
-          args: this.serverConfig.args,
-          env: this.serverConfig.env,
-          stderr: 'inherit',
-          cwd: this.pkgPath,
-        });
-
-        this.client = new Client(
-          { name: "agentbrew-client", version: "1.0.0" },
-          { capabilities: {} }
-        );
-
-        await this.client.connect(this.transport);
-        
-        this.status = ClientStatus.CONNECTED;
-        if (!wasRetrying) {
-          this.retryCount = 0;
-        }
-
-        // Add exit handler:
-        this.transport.onclose = () => {
-          if (this.status !== ClientStatus.DISCONNECTED) {
-              this.handleCrash();
-          }
-        };
-
-        return this.client;
+        return await this.spawnClient(false);
       } catch (e: any) {
         this.lastError = e.message;
         throw e;
@@ -97,23 +100,42 @@ export class ManagedClient {
   }
 
   private async handleCrash() {
-      this.status = ClientStatus.RETRYING;
-      if (this.retryCount < this.maxRetries) {
-          this.retryCount++;
-          const delay = Math.pow(2, this.retryCount) * 1000;
-          Logger.info(`Server ${this.prefix} crashed. Retrying ${this.retryCount}/${this.maxRetries} in ${delay/1000}s...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          try {
-              this.client = null;
-              this.transport = null;
-              await this.getClient();
-          } catch (e: any) {
-              this.lastError = e.message;
-          }
-      } else {
-          this.status = ClientStatus.FAILED;
-          Logger.error(`Server ${this.prefix} failed permanently after ${this.maxRetries} attempts.`);
+    if (this.status === ClientStatus.FAILED || this.status === ClientStatus.DISCONNECTED) return;
+    this.status = ClientStatus.RETRYING;
+
+    if (this.retryCount < this.maxRetries) {
+      this.retryCount++;
+      const delay = Math.pow(2, this.retryCount) * 1000;
+      Logger.info(`Server ${this.prefix} crashed. Retrying ${this.retryCount}/${this.maxRetries} in ${delay/1000}s...`);
+
+      // Set connectingPromise to represent the wait delay + reconnect sequence
+      this.connectingPromise = (async () => {
+        await new Promise(resolve => setTimeout(resolve, delay));
+        try {
+          this.client = null;
+          this.transport = null;
+          return await this.spawnClient(true);
+        } catch (e: any) {
+          this.lastError = e.message;
+          throw e;
+        } finally {
+          this.connectingPromise = null;
+        }
+      })();
+
+      try {
+        await this.connectingPromise;
+      } catch (e) {
+        // If the reconnect failed, trigger the next retry if still applicable
+        const currentStatus = this.status as ClientStatus;
+        if (currentStatus !== ClientStatus.DISCONNECTED && currentStatus !== ClientStatus.FAILED) {
+          this.handleCrash();
+        }
       }
+    } else {
+      this.status = ClientStatus.FAILED;
+      Logger.error(`Server ${this.prefix} failed permanently after ${this.maxRetries} attempts.`);
+    }
   }
 
   async stop() {
@@ -504,7 +526,7 @@ export class Router {
     // Register local markdown prompts
     if (pkg.manifest.prompts) {
       for (const prompt of pkg.manifest.prompts) {
-        if (!isPackageEnabled(pkgId, prompt.name)) continue;
+        if (!isPackageEnabled(pkg.packageName, prompt.name)) continue;
         const prefix = `${pkgId}__${prompt.name}`;
         this.localPrompts.set(prefix, {
           pkgPath: pkg.path,

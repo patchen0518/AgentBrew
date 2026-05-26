@@ -50,6 +50,14 @@ export interface PackageInfo {
   isEnabled: boolean;
 }
 
+async function withTimeout<T>(promise: Promise<T>, ms: number, errorMessage: string): Promise<T> {
+  let timeoutId: NodeJS.Timeout;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(errorMessage)), ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+}
+
 /**
  * Discovers capabilities by briefly running the server and saves them to mcp-manifest.json.
  */
@@ -90,7 +98,7 @@ export async function generateMcpManifest(pkgPath: string, manifest: PackageMani
             );
 
             try {
-                await client.connect(transport);
+                await withTimeout(client.connect(transport), 10000, "Connection timeout of 10s exceeded");
                 
                 let toolsList: any[] = [];
                 let promptsList: any[] = [];
@@ -126,6 +134,9 @@ export async function generateMcpManifest(pkgPath: string, manifest: PackageMani
                 await client.close();
             } catch (e: any) {
                 Logger.error(`Failed to connect or discover capabilities for ${server.name}: ${e.message}`);
+                try {
+                    await transport.close();
+                } catch (closeErr) {}
             }
         }
     }

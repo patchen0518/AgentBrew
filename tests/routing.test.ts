@@ -1,6 +1,7 @@
 import { Router } from '../src/router';
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { disablePackage, enablePackage } from '../src/state';
 import {
   CallToolRequestSchema,
   ListResourceTemplatesRequestSchema,
@@ -282,5 +283,47 @@ describe('Router Resource Routing', () => {
       uri: 'https://example.com/path?q=1#frag'
     });
     expect(result.contents[0].text).toBe('Complex content');
+  });
+});
+
+describe('Router Prompt Enablement Alignment', () => {
+  beforeEach(() => {
+    enablePackage('subpath-package');
+  });
+
+  afterEach(() => {
+    enablePackage('subpath-package');
+  });
+
+  test('does not register prompts for disabled sub-path package', () => {
+    const router = new Router();
+    
+    // Disable the package by its base package name
+    disablePackage('subpath-package');
+
+    // Register a package with a subPath
+    // @ts-ignore
+    router.registerPackage({
+      packageName: 'subpath-package',
+      subPath: 'sub-dir',
+      path: '/tmp/subpath-package/sub-dir',
+      manifest: {
+        name: 'subpath-package-prompt',
+        version: '1.0.0',
+        prompts: [
+          {
+            name: 'my-prompt',
+            file: 'prompt.md',
+            description: 'My prompt'
+          }
+        ]
+      },
+      isEnabled: false
+    });
+
+    // Check if the prompt was registered in localPrompts
+    // @ts-ignore
+    const hasPrompt = router.localPrompts.has('subpath-package/sub-dir__my-prompt');
+    expect(hasPrompt).toBe(false);
   });
 });

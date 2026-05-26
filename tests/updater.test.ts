@@ -66,12 +66,38 @@ describe('updater', () => {
     expect(Logger.info).toHaveBeenCalledWith(expect.stringContaining("No remotes configured"));
   });
 
-  it('should fail if repo is not clean', async () => {
+  it('should fail if repo has modified tracked files', async () => {
     (fs.existsSync as jest.Mock).mockReturnValue(true);
     mockGit.getRemotes = jest.fn().mockResolvedValue([{ name: 'origin' }]);
-    mockGit.status.mockResolvedValue({ isClean: () => false, files: ['file.ts'] });
+    mockGit.status.mockResolvedValue({
+      modified: ['file.ts'],
+      deleted: [],
+      staged: [],
+      files: ['file.ts']
+    });
 
-    await expect(updatePackage('dirty-pkg')).rejects.toThrow("Local changes detected.");
+    await expect(updatePackage('dirty-pkg')).rejects.toThrow("Local changes detected in tracked files.");
+  });
+
+  it('should NOT fail if repo only has untracked files', async () => {
+    (fs.existsSync as jest.Mock).mockReturnValue(true);
+    mockGit.getRemotes = jest.fn().mockResolvedValue([{ name: 'origin' }]);
+    mockGit.status.mockResolvedValue({
+      modified: [],
+      deleted: [],
+      staged: [],
+      files: ['untracked_file.txt']
+    });
+    mockGit.revparse.mockImplementation((args: string[]) => {
+      if (args.includes('HEAD')) return Promise.resolve('hash1');
+      if (args.includes('@{u}')) return Promise.resolve('hash2');
+      return Promise.resolve('');
+    });
+    (registry.findManifests as jest.Mock).mockReturnValue([]);
+
+    const result = await updatePackage('untracked-only-pkg');
+    expect(result).toBe(true);
+    expect(mockGit.pull).toHaveBeenCalledWith(['--ff-only']);
   });
 
   it('should fail if branches have diverged (pull fails)', async () => {
