@@ -81,4 +81,36 @@ args = ["index.js"]
     expect(pkg2?.manifest.prompts?.[0].name).toBe('skill1');
     expect(pkg2?.manifest.prompts?.[0].description).toBe('Skill 1');
   });
+
+  test('auto-detects poetry projects with poetry run python', () => {
+    const pkgPath = path.join(PACKAGES_DIR, 'poetry-pkg');
+    
+    (fs.existsSync as jest.Mock).mockImplementation((p: string) => {
+        if (p === PACKAGES_DIR) return true;
+        if (p === pkgPath) return true;
+        if (p === path.join(pkgPath, 'pyproject.toml')) return true;
+        if (p === path.join(pkgPath, 'poetry.lock')) return true;
+        return false;
+    });
+
+    (fs.readdirSync as jest.Mock).mockImplementation((p: string) => {
+        if (p === PACKAGES_DIR) return ['poetry-pkg'];
+        if (p === pkgPath) return ['pyproject.toml', 'poetry.lock'];
+        return [];
+    });
+
+    (fs.statSync as jest.Mock).mockImplementation((p: string) => ({
+        isDirectory: () => p === PACKAGES_DIR || p === pkgPath
+    }));
+
+    (fs.readFileSync as jest.Mock).mockImplementation((p: string) => {
+        if (p === path.join(pkgPath, 'pyproject.toml')) return 'dependencies = { mcp = "*" }';
+        return "";
+    });
+
+    const packages = discoverPackages(true);
+    expect(packages.length).toBe(1);
+    expect(packages[0].manifest.servers).toBeDefined();
+    expect(packages[0].manifest.servers?.[0].command).toBe('poetry run python');
+  });
 });

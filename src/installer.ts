@@ -16,6 +16,26 @@ const mkdirAsync = fs.promises.mkdir;
 const rmAsync = fs.promises.rm;
 const INSTALL_TIMEOUT = 300000; // 5 minutes
 
+const PM_HELP = {
+  pnpm: "To install pnpm, run: npm install -g pnpm",
+  yarn: "To install yarn, run: npm install -g yarn",
+  bun: "To install bun, visit: https://bun.sh",
+  npm: "Ensure Node.js and npm are installed correctly.",
+  poetry: "To install poetry, visit: https://python-poetry.org/docs/#installation",
+  uv: "To install uv, visit: https://github.com/astral-sh/uv"
+};
+
+async function ensurePackageManager(pm: keyof typeof PM_HELP) {
+  try {
+    await execAsync(`${pm} --version`);
+  } catch (e) {
+    throw new Error(
+      `Package manager '${pm}' is required to install this package, but it was not found.\n` +
+      `Suggestion: ${PM_HELP[pm]}`
+    );
+  }
+}
+
 function redactUrl(url: string): string {
   try {
     const parsed = new URL(url);
@@ -106,7 +126,12 @@ export async function installPackage(url: string) {
     throw new Error(`Package '${repoName}' is already installed at ${targetPath}. Uninstall it first to install a different version.`);
   }
 
-  const git = simpleGit().env({ ...process.env, GIT_TERMINAL_PROMPT: '0' });
+  const gitEnv: Record<string, string | undefined> = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+  // Simple-git's argv-parser blocks PAGER/GIT_PAGER by default for security
+  delete gitEnv.PAGER;
+  delete gitEnv.GIT_PAGER;
+
+  const git = simpleGit().env(gitEnv);
   try {
     Logger.info(`Cloning ${safeLogUrl} into ${targetPath}...`);
     await git.clone(sanitizedUrl, targetPath);
@@ -156,17 +181,32 @@ export async function installPackage(url: string) {
   }
 }
 
-async function resolveDependencies(pkgPath: string) {
+export async function resolveDependencies(pkgPath: string) {
   Logger.info(`Resolving dependencies in ${pkgPath}...`);
   
   const packageJsonPath = path.join(pkgPath, 'package.json');
   const pnpmLockPath = path.join(pkgPath, 'pnpm-lock.yaml');
+  const yarnLockPath = path.join(pkgPath, 'yarn.lock');
+  const bunLockPath = path.join(pkgPath, 'bun.lockb');
+  const npmLockPath = path.join(pkgPath, 'package-lock.json');
   const requirementsPath = path.join(pkgPath, 'requirements.txt');
+  const poetryLockPath = path.join(pkgPath, 'poetry.lock');
+  const uvLockPath = path.join(pkgPath, 'uv.lock');
 
-  let packageManager: 'npm' | 'pnpm' | null = null;
+  let packageManager: 'npm' | 'pnpm' | 'yarn' | 'bun' | 'poetry' | 'uv' | null = null;
 
   if (fs.existsSync(pnpmLockPath)) {
     packageManager = 'pnpm';
+  } else if (fs.existsSync(yarnLockPath)) {
+    packageManager = 'yarn';
+  } else if (fs.existsSync(bunLockPath)) {
+    packageManager = 'bun';
+  } else if (fs.existsSync(npmLockPath)) {
+    packageManager = 'npm';
+  } else if (fs.existsSync(poetryLockPath)) {
+    packageManager = 'poetry';
+  } else if (fs.existsSync(uvLockPath)) {
+    packageManager = 'uv';
   } else if (fs.existsSync(packageJsonPath)) {
     packageManager = 'npm';
   }
@@ -174,19 +214,27 @@ async function resolveDependencies(pkgPath: string) {
   const execOpts = { cwd: pkgPath, maxBuffer: 1024 * 1024 * 50, timeout: INSTALL_TIMEOUT };
 
   if (packageManager) {
-    Logger.info(`Installing JS dependencies with ${packageManager}...`);
-    await execAsync(`${packageManager} install`, execOpts);
+    await ensurePackageManager(packageManager);
+    Logger.info(`Installing dependencies with ${packageManager}...`);
+    
+    if (packageManager === 'poetry') {
+      await execAsync(`poetry install`, execOpts);
+    } else if (packageManager === 'uv') {
+      await execAsync(`uv sync`, execOpts);
+    } else {
+      await execAsync(`${packageManager} install`, execOpts);
 
-    if (fs.existsSync(packageJsonPath)) {
-      try {
-        const pkgJson = JSON.parse(await readFileAsync(packageJsonPath, 'utf-8'));
-        if (pkgJson.scripts?.build) {
-          Logger.info(`Running build script with ${packageManager}...`);
-          await execAsync(`${packageManager} run build`, execOpts);
+      if (fs.existsSync(packageJsonPath)) {
+        try {
+          const pkgJson = JSON.parse(await readFileAsync(packageJsonPath, 'utf-8'));
+          if (pkgJson.scripts?.build) {
+            Logger.info(`Running build script with ${packageManager}...`);
+            await execAsync(`${packageManager} run build`, execOpts);
+          }
+        } catch (e) {
+          Logger.error(`Failed to parse or run build script for ${packageJsonPath}:`, e);
+          throw e;
         }
-      } catch (e) {
-        Logger.error(`Failed to parse or run build script for ${packageJsonPath}:`, e);
-        throw e;
       }
     }
   } else if (fs.existsSync(requirementsPath)) {

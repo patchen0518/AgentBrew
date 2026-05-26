@@ -56,6 +56,23 @@ export interface PackageInfo {
 export async function generateMcpManifest(pkgPath: string, manifest: PackageManifest): Promise<McpManifestCache> {
     const cache: McpManifestCache = { ...manifest, discovered: { tools: {}, prompts: {}, resources: {} } };
     
+    // Add auto-detected prompts to discovered
+    if (manifest.prompts) {
+        cache.discovered!.prompts!["local"] = manifest.prompts.map(p => ({
+            name: p.name,
+            description: p.description
+        }));
+    }
+
+    // Add instructions to discovered resources
+    if (manifest.instructions) {
+        cache.discovered!.resources!["local"] = manifest.instructions.map(i => ({
+            name: i.name,
+            uri: `file://${path.join(pkgPath, i.file)}`,
+            description: `Instruction file: ${i.file}`
+        }));
+    }
+
     if (manifest.servers) {
         for (const server of manifest.servers) {
             Logger.info(`Discovering capabilities for server: ${server.name}...`);
@@ -197,6 +214,9 @@ export function findManifests(currentPath: string, depth: number): { path: strin
         // Only include auto-detected if it found something useful
         if (fs.existsSync(path.join(currentPath, 'package.json')) || 
             fs.existsSync(path.join(currentPath, 'requirements.txt')) || 
+            fs.existsSync(path.join(currentPath, 'pyproject.toml')) ||
+            fs.existsSync(path.join(currentPath, 'poetry.lock')) ||
+            fs.existsSync(path.join(currentPath, 'uv.lock')) ||
             (autoManifest.prompts && autoManifest.prompts.length > 0) ||
             (autoManifest.instructions && autoManifest.instructions.length > 0)) {
             results.push({ path: currentPath, manifest: autoManifest });
@@ -284,6 +304,7 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
   // Detect Python projects
   const requirementsPath = path.join(pkgPath, 'requirements.txt');
   const pyprojectPath = path.join(pkgPath, 'pyproject.toml');
+  const poetryLockPath = path.join(pkgPath, 'poetry.lock');
   
   if (fs.existsSync(requirementsPath) || fs.existsSync(pyprojectPath)) {
     let isMcp = false;
@@ -299,16 +320,20 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
     if (isMcp) {
         manifest.servers = manifest.servers || [];
         
-        // Check for local .venv
+        // Check for local .venv or Poetry
         let pythonCmd = 'python3';
-        const venvDir = '.venv';
-        const venvPath = path.join(pkgPath, venvDir);
-        if (fs.existsSync(venvPath)) {
-            const venvPython = process.platform === 'win32' 
-                ? path.join(venvPath, 'Scripts', 'python.exe')
-                : path.join(venvPath, 'bin', 'python3');
-            if (fs.existsSync(venvPython)) {
-                pythonCmd = venvPython;
+        if (fs.existsSync(poetryLockPath)) {
+            pythonCmd = 'poetry run python';
+        } else {
+            const venvDir = '.venv';
+            const venvPath = path.join(pkgPath, venvDir);
+            if (fs.existsSync(venvPath)) {
+                const venvPython = process.platform === 'win32' 
+                    ? path.join(venvPath, 'Scripts', 'python.exe')
+                    : path.join(venvPath, 'bin', 'python3');
+                if (fs.existsSync(venvPython)) {
+                    pythonCmd = venvPython;
+                }
             }
         }
 
@@ -344,32 +369,42 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
 
   if (isSkillDir) {
     try {
-      const files = fs.readdirSync(pkgPath);
-      const mdFiles = files.filter((f: string) => 
-        f.endsWith('.md') && 
-        !instructionFiles.includes(f.toUpperCase()) && 
-        f.toLowerCase() !== 'readme.md'
-      );
-      
-      if (mdFiles.length > 0) {
-          manifest.prompts = manifest.prompts || [];
-          for (const file of mdFiles) {
-              let description = `Markdown skill: ${file}`;
-              try {
-                  const firstLines = fs.readFileSync(path.join(pkgPath, file), 'utf-8').split('\n');
-                  const firstNonEmpty = firstLines.find(l => l.trim().length > 0);
-                  if (firstNonEmpty) {
-                      description = firstNonEmpty.replace(/^#+\s*/, '').trim();
+      const detectSkillsRecursive = (dir: string, baseDir: string) => {
+          const files = fs.readdirSync(dir);
+          for (const file of files) {
+              const fullPath = path.join(dir, file);
+              const relativePath = path.relative(baseDir, fullPath);
+              if (fs.statSync(fullPath).isDirectory()) {
+                  if (file !== 'node_modules' && !file.startsWith('.')) {
+                      detectSkillsRecursive(fullPath, baseDir);
                   }
-              } catch (e) {}
+              } else if (file.endsWith('.md')) {
+                  if (!instructionFiles.includes(file.toUpperCase()) && file.toLowerCase() !== 'readme.md') {
+                      let description = `Markdown skill: ${relativePath}`;
+                      try {
+                          const firstLines = fs.readFileSync(fullPath, 'utf-8').split('\n');
+                          const firstNonEmpty = firstLines.find(l => l.trim().length > 0);
+                          if (firstNonEmpty) {
+                              description = firstNonEmpty.replace(/^#+\s*/, '').trim();
+                          }
+                      } catch (e) {}
 
-              manifest.prompts.push({
-                  name: path.parse(file).name,
-                  file: file,
-                  description: description
-              });
+                      manifest.prompts = manifest.prompts || [];
+                      let skillName = path.parse(file).name;
+                      if (skillName.toUpperCase() === 'SKILL' && dir !== pkgPath) {
+                          skillName = path.basename(dir);
+                      }
+                      manifest.prompts.push({
+                          name: skillName,
+                          file: relativePath,
+                          description: description
+                      });
+                  }
+              }
           }
-      }
+      };
+
+      detectSkillsRecursive(pkgPath, pkgPath);
     } catch (e) {
         // Ignore
     }

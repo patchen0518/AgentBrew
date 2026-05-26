@@ -156,6 +156,40 @@ describe('Installer', () => {
     expect(mockExec).toHaveBeenCalledWith(expect.stringContaining('pip install -r requirements.txt'), expect.objectContaining({ cwd: targetPath }), expect.any(Function));
   });
 
+  test('calls poetry install when poetry.lock exists', async () => {
+    const url = 'https://github.com/user/poetry-repo.git';
+    const targetPath = getExpectedPath(url);
+
+    (fs.existsSync as jest.Mock).mockImplementation((p: string) => {
+        if (p === targetPath) return false;
+        if (p.endsWith('packages')) return true;
+        if (p.endsWith('poetry.lock')) return true;
+        return false;
+    });
+
+    await installPackage(url);
+
+    expect(mockExec).toHaveBeenCalledWith('poetry --version', expect.any(Function));
+    expect(mockExec).toHaveBeenCalledWith('poetry install', expect.objectContaining({ cwd: targetPath }), expect.any(Function));
+  });
+
+  test('calls uv sync when uv.lock exists', async () => {
+    const url = 'https://github.com/user/uv-repo.git';
+    const targetPath = getExpectedPath(url);
+
+    (fs.existsSync as jest.Mock).mockImplementation((p: string) => {
+        if (p === targetPath) return false;
+        if (p.endsWith('packages')) return true;
+        if (p.endsWith('uv.lock')) return true;
+        return false;
+    });
+
+    await installPackage(url);
+
+    expect(mockExec).toHaveBeenCalledWith('uv --version', expect.any(Function));
+    expect(mockExec).toHaveBeenCalledWith('uv sync', expect.objectContaining({ cwd: targetPath }), expect.any(Function));
+  });
+
   test('cleans up target directory on failure', async () => {
     const url = 'https://github.com/user/failrepo.git';
     const targetPath = getExpectedPath(url);

@@ -124,6 +124,12 @@ program
                     Logger.info(`  ├── [SKILL] ${prompt.name} ${capStatus} - ${prompt.description || ""}`);
                 }
             }
+            // Resources (Instructions)
+            if (item.manifest.instructions) {
+                for (const instr of item.manifest.instructions) {
+                    Logger.info(`  ├── [RESOURCE] ${instr.name} (${instr.file})`);
+                }
+            }
         }
     }
   });
