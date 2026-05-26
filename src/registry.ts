@@ -92,19 +92,40 @@ export async function generateMcpManifest(pkgPath: string, manifest: PackageMani
             try {
                 await client.connect(transport);
                 
-                const tools = await client.listTools();
-                const prompts = await client.listPrompts();
-                const resources = await client.listResources();
+                let toolsList: any[] = [];
+                let promptsList: any[] = [];
+                let resourcesList: any[] = [];
+
+                try {
+                    const result = await client.listTools();
+                    toolsList = result.tools || [];
+                } catch (e: any) {
+                    Logger.info(`Server ${server.name} does not support tools discovery: ${e.message}`);
+                }
+
+                try {
+                    const result = await client.listPrompts();
+                    promptsList = result.prompts || [];
+                } catch (e: any) {
+                    Logger.info(`Server ${server.name} does not support prompts discovery: ${e.message}`);
+                }
+
+                try {
+                    const result = await client.listResources();
+                    resourcesList = result.resources || [];
+                } catch (e: any) {
+                    Logger.info(`Server ${server.name} does not support resources discovery: ${e.message}`);
+                }
 
                 if (cache.discovered) {
-                    cache.discovered.tools![server.name] = tools.tools;
-                    cache.discovered.prompts![server.name] = prompts.prompts;
-                    cache.discovered.resources![server.name] = resources.resources;
+                    cache.discovered.tools![server.name] = toolsList;
+                    cache.discovered.prompts![server.name] = promptsList;
+                    cache.discovered.resources![server.name] = resourcesList;
                 }
 
                 await client.close();
             } catch (e: any) {
-                Logger.error(`Failed to discover capabilities for ${server.name}: ${e.message}`);
+                Logger.error(`Failed to connect or discover capabilities for ${server.name}: ${e.message}`);
             }
         }
     }
@@ -363,9 +384,9 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
     }
   }
 
-  // Detect Markdown skills (only in skills/ or prompts/ directories)
+  // Detect Markdown skills (only in skills/, prompts/, or migrated-skills/ directories)
   const dirName = path.basename(pkgPath).toLowerCase();
-  const isSkillDir = dirName === 'skills' || dirName === 'prompts';
+  const isSkillDir = dirName === 'skills' || dirName === 'prompts' || dirName === 'migrated-skills';
 
   if (isSkillDir) {
     try {
