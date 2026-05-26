@@ -36,6 +36,7 @@ export class ManagedClient {
   private retryCount: number = 0;
   private lastError: string | null = null;
   private maxRetries: number = 3;
+  private connectingPromise: Promise<Client> | null = null;
 
   constructor(
     public prefix: string,
@@ -48,52 +49,60 @@ export class ManagedClient {
       throw new Error(`[AgentBrew] Server '${this.prefix}' failed after ${this.maxRetries} attempts. Last error: ${this.lastError}`);
     }
     if (this.client && this.status === ClientStatus.CONNECTED) return this.client;
+    if (this.connectingPromise) return this.connectingPromise;
 
     const wasRetrying = this.status === ClientStatus.RETRYING;
     this.status = ClientStatus.CONNECTING;
 
-    try {
-      Logger.info(`Starting MCP server for ${this.prefix}...`);
-      this.transport = new StdioClientTransport({
-        command: this.serverConfig.command,
-        args: this.serverConfig.args,
-        env: this.serverConfig.env,
-        stderr: 'inherit',
-        cwd: this.pkgPath,
-      });
+    this.connectingPromise = (async () => {
+      try {
+        Logger.info(`Starting MCP server for ${this.prefix}...`);
+        this.transport = new StdioClientTransport({
+          command: this.serverConfig.command,
+          args: this.serverConfig.args,
+          env: this.serverConfig.env,
+          stderr: 'inherit',
+          cwd: this.pkgPath,
+        });
 
-      this.client = new Client(
-        { name: "agentbrew-client", version: "1.0.0" },
-        { capabilities: {} }
-      );
+        this.client = new Client(
+          { name: "agentbrew-client", version: "1.0.0" },
+          { capabilities: {} }
+        );
 
-      await this.client.connect(this.transport);
-      
-      this.status = ClientStatus.CONNECTED;
-      if (!wasRetrying) {
-        this.retryCount = 0;
-      }
-
-      // Add exit handler:
-      this.transport.onclose = () => {
-        if (this.status !== ClientStatus.DISCONNECTED) {
-            this.handleCrash();
+        await this.client.connect(this.transport);
+        
+        this.status = ClientStatus.CONNECTED;
+        if (!wasRetrying) {
+          this.retryCount = 0;
         }
-      };
 
-      return this.client;
-    } catch (e: any) {
-      this.lastError = e.message;
-      throw e;
-    }
+        // Add exit handler:
+        this.transport.onclose = () => {
+          if (this.status !== ClientStatus.DISCONNECTED) {
+              this.handleCrash();
+          }
+        };
+
+        return this.client;
+      } catch (e: any) {
+        this.lastError = e.message;
+        throw e;
+      } finally {
+        this.connectingPromise = null;
+      }
+    })();
+
+    return this.connectingPromise;
   }
 
   private async handleCrash() {
       this.status = ClientStatus.RETRYING;
       if (this.retryCount < this.maxRetries) {
           this.retryCount++;
-          Logger.info(`Server ${this.prefix} crashed. Retrying ${this.retryCount}/${this.maxRetries} in 2s...`);
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          const delay = Math.pow(2, this.retryCount) * 1000;
+          Logger.info(`Server ${this.prefix} crashed. Retrying ${this.retryCount}/${this.maxRetries} in ${delay/1000}s...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
           try {
               this.client = null;
               this.transport = null;

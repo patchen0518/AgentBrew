@@ -110,11 +110,15 @@ export async function analyzePackage(pkgPath: string) {
     const scripts: string[] = [];
     const packageJsonPath = path.join(pkgPath, 'package.json');
     if (fs.existsSync(packageJsonPath)) {
-        const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
-        if (pkg.scripts) {
-            ['preinstall', 'install', 'postinstall', 'build'].forEach(s => {
-                if (pkg.scripts[s]) scripts.push(`${s}: ${pkg.scripts[s]}`);
-            });
+        try {
+            const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+            if (pkg.scripts) {
+                ['preinstall', 'install', 'postinstall', 'prebuild', 'build', 'postbuild'].forEach(s => {
+                    if (pkg.scripts[s]) scripts.push(`${s}: ${pkg.scripts[s]}`);
+                });
+            }
+        } catch (e) {
+            Logger.error(`Failed to parse package.json for analysis at ${packageJsonPath}`);
         }
     }
     // Return summary object
