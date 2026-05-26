@@ -32,9 +32,10 @@ describe('updater', () => {
     (config.getPackagesDir as jest.Mock).mockReturnValue(mockPackagesDir);
     mockGit = {
       fetch: jest.fn().mockResolvedValue({}),
-      status: jest.fn().mockResolvedValue({ isClean: () => true }),
+      status: jest.fn().mockResolvedValue({ isClean: () => true, files: [] }),
       revparse: jest.fn(),
       pull: jest.fn().mockResolvedValue({}),
+      getRemotes: jest.fn().mockResolvedValue([{ name: 'origin' }]),
     };
     (simpleGit as jest.Mock).mockReturnValue(mockGit);
   });
@@ -56,15 +57,39 @@ describe('updater', () => {
     expect(Logger.info).toHaveBeenCalledWith(expect.stringContaining("Not a Git-managed package"));
   });
 
+  it('should skip if no remotes are configured', async () => {
+    (fs.existsSync as jest.Mock).mockReturnValue(true);
+    mockGit.getRemotes = jest.fn().mockResolvedValue([]);
+
+    const result = await updatePackage('no-remote-pkg');
+    expect(result).toBe(false);
+    expect(Logger.info).toHaveBeenCalledWith(expect.stringContaining("No remotes configured"));
+  });
+
   it('should fail if repo is not clean', async () => {
     (fs.existsSync as jest.Mock).mockReturnValue(true);
-    mockGit.status.mockResolvedValue({ isClean: () => false });
+    mockGit.getRemotes = jest.fn().mockResolvedValue([{ name: 'origin' }]);
+    mockGit.status.mockResolvedValue({ isClean: () => false, files: ['file.ts'] });
 
-    await expect(updatePackage('dirty-pkg')).rejects.toThrow("'dirty-pkg' has local changes");
+    await expect(updatePackage('dirty-pkg')).rejects.toThrow("Local changes detected.");
+  });
+
+  it('should fail if branches have diverged (pull fails)', async () => {
+    (fs.existsSync as jest.Mock).mockReturnValue(true);
+    mockGit.getRemotes = jest.fn().mockResolvedValue([{ name: 'origin' }]);
+    mockGit.revparse.mockImplementation((args: string[]) => {
+      if (args.includes('HEAD')) return Promise.resolve('hash1');
+      if (args.includes('@{u}')) return Promise.resolve('hash2');
+      return Promise.resolve('');
+    });
+    mockGit.pull.mockRejectedValue(new Error('Merge conflict or diverged'));
+
+    await expect(updatePackage('diverged-pkg')).rejects.toThrow("Branches have diverged. Manual intervention required.");
   });
 
   it('should skip if already up to date', async () => {
     (fs.existsSync as jest.Mock).mockReturnValue(true);
+    mockGit.getRemotes = jest.fn().mockResolvedValue([{ name: 'origin' }]);
     mockGit.revparse.mockImplementation((args: string[]) => {
       if (args.includes('HEAD')) return Promise.resolve('hash1');
       if (args.includes('@{u}')) return Promise.resolve('hash1');

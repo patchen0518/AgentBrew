@@ -21,12 +21,18 @@ export async function updatePackage(packageName: string): Promise<boolean> {
 
   const git = simpleGit(pkgPath);
   
+  const remotes = await git.getRemotes();
+  if (remotes.length === 0) {
+    Logger.info(`Skipping '${packageName}': No remotes configured.`);
+    return false;
+  }
+
   Logger.info(`Checking for updates for '${packageName}'...`);
   await git.fetch();
   
   const status = await git.status();
   if (!status.isClean()) {
-    throw new Error(`'${packageName}' has local changes. Commit or stash them first.`);
+    throw new Error('Local changes detected.');
   }
 
   const localHead = await git.revparse(['HEAD']);
@@ -38,7 +44,11 @@ export async function updatePackage(packageName: string): Promise<boolean> {
   }
 
   Logger.info(`Updating '${packageName}'...`);
-  await git.pull(['--ff-only']);
+  try {
+    await git.pull(['--ff-only']);
+  } catch (error) {
+    throw new Error('Branches have diverged. Manual intervention required.');
+  }
   
   // Re-provision
   await resolveDependencies(pkgPath);
