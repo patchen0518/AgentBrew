@@ -1,5 +1,5 @@
 // tests/installer.test.ts
-import { installPackage } from '../src/installer';
+import { installPackage, analyzePackage } from '../src/installer';
 import { exec } from 'child_process';
 import simpleGit from 'simple-git';
 import fs from 'fs';
@@ -15,6 +15,7 @@ jest.mock('fs', () => {
         ...actualFs,
         existsSync: jest.fn(),
         writeFileSync: jest.fn(),
+        readFileSync: jest.fn(),
         promises: {
             ...actualFs.promises,
             readFile: jest.fn(),
@@ -42,6 +43,7 @@ describe('Installer', () => {
       env: jest.fn().mockReturnThis(),
     });
     (fs.existsSync as jest.Mock).mockReturnValue(false);
+    (fs.readFileSync as jest.Mock).mockReturnValue('{}');
     
     mockExec = exec as unknown as jest.Mock;
     mockExec.mockImplementation((cmd, opts, callback) => {
@@ -54,6 +56,49 @@ describe('Installer', () => {
 
     (registry.findManifests as jest.Mock).mockReturnValue([]);
     (registry.generateMcpManifest as jest.Mock).mockResolvedValue({});
+  });
+
+  test('analyzePackage correctly extracts scripts', async () => {
+    const pkgPath = '/tmp/test-pkg';
+    (fs.existsSync as jest.Mock).mockImplementation((p) => p === path.join(pkgPath, 'package.json'));
+    (fs.readFileSync as jest.Mock).mockReturnValue(JSON.stringify({
+        scripts: {
+            preinstall: 'echo pre',
+            install: 'echo inst',
+            postinstall: 'echo post',
+            build: 'tsc',
+            test: 'jest' // should be ignored
+        }
+    }));
+
+    const result = await analyzePackage(pkgPath);
+    expect(result.scripts).toContain('preinstall: echo pre');
+    expect(result.scripts).toContain('install: echo inst');
+    expect(result.scripts).toContain('postinstall: echo post');
+    expect(result.scripts).toContain('build: tsc');
+    expect(result.scripts).not.toContain('test: jest');
+  });
+
+  test('installPackage calls confirm callback and aborts if denied', async () => {
+    const url = 'https://github.com/user/abortrepo.git';
+    const targetPath = getExpectedPath(url);
+    const confirm = jest.fn().mockResolvedValue(false);
+
+    let abortRepoExists = false;
+    (fs.existsSync as jest.Mock).mockImplementation((p: string) => {
+        if (p === targetPath) return abortRepoExists;
+        if (p.endsWith('packages')) return true;
+        return false;
+    });
+
+    mockClone.mockImplementation(() => {
+        abortRepoExists = true;
+        return Promise.resolve();
+    });
+
+    await expect(installPackage(url, confirm)).rejects.toThrow("Installation aborted by user after security review.");
+    expect(confirm).toHaveBeenCalled();
+    expect(fs.promises.rm).toHaveBeenCalledWith(targetPath, expect.objectContaining({ recursive: true }));
   });
 
   test('calls npm install and build when package.json exists', async () => {

@@ -9,6 +9,7 @@ import { discoverPackages, PackageInfo, findManifests, generateMcpManifest } fro
 import { runMigration, discoverExternalConfigs } from './migration';
 import fs from 'fs';
 import path from 'path';
+import readline from 'readline';
 
 import * as toml from 'smol-toml';
 
@@ -69,7 +70,20 @@ program
   .argument('<url>', 'Git URL of the package')
   .action(async (url: string) => {
     try {
-      await installPackage(url);
+      await installPackage(url, async (summary) => {
+        if (summary.scripts.length > 0) {
+          Logger.info("\nPotentially unsafe scripts found in package.json:");
+          summary.scripts.forEach(s => Logger.info(`  - ${s}`));
+          Logger.info("");
+        } else {
+          Logger.info("\nNo installation scripts found.");
+        }
+
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        const answer = await new Promise<string>(resolve => rl.question('Proceed with installation? [y/N] ', resolve));
+        rl.close();
+        return answer.toLowerCase() === 'y';
+      });
       Logger.info(`Successfully installed package from ${url}`);
     } catch (error: any) {
       Logger.error(`Failed to install package: ${error.message}`);

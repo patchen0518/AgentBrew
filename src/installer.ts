@@ -106,7 +106,22 @@ function validateName(name: string, context: string) {
   }
 }
 
-export async function installPackage(url: string) {
+export async function analyzePackage(pkgPath: string) {
+    const scripts: string[] = [];
+    const packageJsonPath = path.join(pkgPath, 'package.json');
+    if (fs.existsSync(packageJsonPath)) {
+        const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+        if (pkg.scripts) {
+            ['preinstall', 'install', 'postinstall', 'build'].forEach(s => {
+                if (pkg.scripts[s]) scripts.push(`${s}: ${pkg.scripts[s]}`);
+            });
+        }
+    }
+    // Return summary object
+    return { scripts };
+}
+
+export async function installPackage(url: string, confirm?: (summary: { scripts: string[] }) => Promise<boolean>) {
   const sanitizedUrl = sanitizeGitUrl(url);
   validateUrl(sanitizedUrl);
   const safeLogUrl = redactUrl(sanitizedUrl);
@@ -136,6 +151,15 @@ export async function installPackage(url: string) {
     Logger.info(`Cloning ${safeLogUrl} into ${targetPath}...`);
     await git.clone(sanitizedUrl, targetPath);
     
+    // Security Audit
+    const summary = await analyzePackage(targetPath);
+    if (confirm) {
+        const approved = await confirm(summary);
+        if (!approved) {
+            throw new Error("Installation aborted by user after security review.");
+        }
+    }
+
     // Post-install dependency resolution
     await resolveDependencies(targetPath);
 
