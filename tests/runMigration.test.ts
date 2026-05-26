@@ -74,11 +74,13 @@ describe('runMigration', () => {
       cb('l');
     });
 
-    await runMigration();
+    const result = await runMigration();
 
     expect(createLinkPackage).toHaveBeenCalledWith('test-srv', 'node', [], undefined);
     expect(Logger.info).toHaveBeenCalledWith(expect.stringContaining('Successfully linked test-srv'));
     expect(rlMock.close).toHaveBeenCalled();
+    expect(result).toBeDefined();
+    expect(result?.servers[0].name).toBe('test-srv');
   });
 
   test('migrates servers via installing', async () => {

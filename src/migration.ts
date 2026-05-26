@@ -28,11 +28,11 @@ export interface DiscoveryResult {
   skills: DiscoveredSkill[];
 }
 
-export async function runMigration() {
+export async function runMigration(): Promise<DiscoveryResult | undefined> {
   const result = discoverExternalConfigs();
   if (result.servers.length === 0 && result.skills.length === 0) {
     Logger.info('No external configurations found to migrate.');
-    return;
+    return undefined;
   }
 
   const rl = readline.createInterface({
@@ -109,8 +109,11 @@ export async function runMigration() {
       Logger.info("\nNote: AgentBrew has made a copy of the migrated skills in its own directory.");
       Logger.info("The original files still exist. You can safely remove them if you only plan to use them via AgentBrew.");
     }
+
+    return result;
   } catch (e: any) {
     Logger.error(`Migration failed: ${e.message}`);
+    return undefined;
   } finally {
     rl.close();
   }

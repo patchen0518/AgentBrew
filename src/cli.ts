@@ -277,11 +277,33 @@ program
         }
       }
     } else {
-      await runMigration();
-      Logger.info("Migration complete!");
-      Logger.info("To use AgentBrew with your agents, run:");
-      Logger.info("  gemini mcp add agentbrew agentbrew");
-      Logger.info("\nNote: If you need to disable AgentBrew later, use 'gemini mcp remove agentbrew'.");
+      const result = await runMigration();
+      if (result) {
+        Logger.info("\nMigration complete!");
+        Logger.info("To use AgentBrew with your agents, follow these steps:");
+
+        const sources = new Set([...result.servers.map(s => s.source), ...result.skills.map(s => s.source)]);
+        
+        if (sources.has('Gemini')) {
+          Logger.info("\nFor Gemini CLI:");
+          Logger.info("  gemini mcp add agentbrew agentbrew");
+        }
+        
+        if (sources.has('Claude')) {
+          Logger.info("\nFor Claude Code:");
+          Logger.info("  /plugin add agentbrew agentbrew");
+        }
+        
+        if (sources.has('Cursor')) {
+          Logger.info("\nFor Cursor:");
+          Logger.info("  Add a new MCP server in Cursor settings with:");
+          Logger.info("  Name: agentbrew");
+          Logger.info("  Type: command");
+          Logger.info("  Command: agentbrew");
+        }
+
+        Logger.info("\nNote: You can always use 'agentbrew list' to see all available tools and skills.");
+      }
     }
   });
 
