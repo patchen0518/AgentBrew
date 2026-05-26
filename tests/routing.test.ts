@@ -1,7 +1,11 @@
 import { Router } from '../src/router';
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  CallToolRequestSchema,
+  ListResourceTemplatesRequestSchema,
+  ReadResourceRequestSchema
+} from "@modelcontextprotocol/sdk/types.js";
 
 jest.mock("@modelcontextprotocol/sdk/server/index.js");
 jest.mock("@modelcontextprotocol/sdk/client/index.js");
@@ -132,5 +136,118 @@ describe('Router Tool Routing', () => {
         name: 'tool_with_underscores',
         arguments: undefined
     });
+  });
+});
+
+describe('Router Resource Routing', () => {
+  let router: Router;
+  let mockServerInstance: any;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockServerInstance = {
+      setRequestHandler: jest.fn(),
+      connect: jest.fn(),
+      close: jest.fn(),
+    };
+    (Server as jest.Mock).mockReturnValue(mockServerInstance);
+    router = new Router();
+  });
+
+  test('lists and transforms resource templates', async () => {
+    const listTemplatesHandler = mockServerInstance.setRequestHandler.mock.calls.find(
+      (call: any) => call[0] === ListResourceTemplatesRequestSchema
+    )?.[1];
+
+    const mockClient = {
+      listResourceTemplates: jest.fn().mockResolvedValue({
+        resourceTemplates: [
+          {
+            uriTemplate: 'myscheme://{path}',
+            name: 'Test Template',
+            description: 'A test template'
+          }
+        ]
+      }),
+    };
+
+    const mockManagedClient = {
+      prefix: 'test-prefix',
+      getClient: jest.fn().mockResolvedValue(mockClient)
+    };
+
+    // @ts-ignore
+    router.managedClients.set('test-prefix', mockManagedClient);
+
+    const result = await listTemplatesHandler();
+
+    expect(result.resourceTemplates).toHaveLength(1);
+    expect(result.resourceTemplates[0].uriTemplate).toBe('mcp://test-prefix/myscheme/{path}');
+  });
+
+  test('proxies readResource for templated URIs', async () => {
+    const readResourceHandler = mockServerInstance.setRequestHandler.mock.calls.find(
+      (call: any) => call[0] === ReadResourceRequestSchema
+    )?.[1];
+
+    const mockClient = {
+      readResource: jest.fn().mockResolvedValue({
+        contents: [{ uri: 'myscheme://some/path', text: 'Resource content' }]
+      }),
+    };
+
+    const mockManagedClient = {
+      prefix: 'test-prefix',
+      getClient: jest.fn().mockResolvedValue(mockClient)
+    };
+
+    // @ts-ignore
+    router.managedClients.set('test-prefix', mockManagedClient);
+
+    const request = {
+      params: {
+        uri: 'mcp://test-prefix/myscheme/some/path'
+      }
+    };
+
+    const result = await readResourceHandler(request);
+
+    expect(mockClient.readResource).toHaveBeenCalledWith({
+      uri: 'myscheme://some/path'
+    });
+    expect(result.contents[0].text).toBe('Resource content');
+  });
+
+  test('handles raw scheme in templated URIs', async () => {
+    const readResourceHandler = mockServerInstance.setRequestHandler.mock.calls.find(
+      (call: any) => call[0] === ReadResourceRequestSchema
+    )?.[1];
+
+    const mockClient = {
+      readResource: jest.fn().mockResolvedValue({
+        contents: [{ uri: 'raw-resource', text: 'Raw content' }]
+      }),
+    };
+
+    const mockManagedClient = {
+      prefix: 'test-prefix',
+      getClient: jest.fn().mockResolvedValue(mockClient)
+    };
+
+    // @ts-ignore
+    router.managedClients.set('test-prefix', mockManagedClient);
+
+    const request = {
+      params: {
+        uri: 'mcp://test-prefix/raw/raw-resource'
+      }
+    };
+
+    const result = await readResourceHandler(request);
+
+    expect(mockClient.readResource).toHaveBeenCalledWith({
+      uri: 'raw-resource'
+    });
+    expect(result.contents[0].text).toBe('Raw content');
   });
 });

@@ -334,12 +334,47 @@ export class Router {
         }
       }
 
+      // Add logic to parse mcp://prefix/scheme/path for templated resources
+      if (uri.startsWith('mcp://')) {
+        const parts = uri.substring(6).split('/');
+        if (parts.length >= 2) {
+          const prefix = parts[0];
+          const scheme = parts[1];
+          let originalUri: string;
+          
+          if (scheme === 'raw') {
+            originalUri = parts.slice(2).join('/');
+          } else {
+            // Reconstruct: scheme://path
+            // Note: parts.slice(2).join('/') will include the host and pathname
+            originalUri = `${scheme}://${parts.slice(2).join('/')}`;
+          }
+          
+          const managed = this.managedClients.get(prefix);
+          if (managed) {
+            const client = await managed.getClient();
+            return await client.readResource({ uri: originalUri });
+          }
+        }
+      }
+
       throw new Error(`Resource not found: ${uri}`);
     });
 
     this.mcpServer.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
       const allTemplates: ResourceTemplate[] = [];
-      // (Lazy loading for templates can be added if needed, currently focusing on core tools/prompts)
+      for (const [prefix, managed] of this.managedClients.entries()) {
+        try {
+          const client = await managed.getClient();
+          const result = await client.listResourceTemplates();
+          allTemplates.push(...result.resourceTemplates.map(t => ({
+            ...t,
+            uriTemplate: `mcp://${prefix}/${t.uriTemplate.replace('://', '/')}`
+          })));
+        } catch (e) {
+          Logger.error(`Failed to list resource templates for ${prefix}: ${e}`);
+        }
+      }
       return { resourceTemplates: allTemplates };
     });
   }
