@@ -250,4 +250,37 @@ describe('Router Resource Routing', () => {
     });
     expect(result.contents[0].text).toBe('Raw content');
   });
+
+  test('handles complex URIs with query parameters and fragments', async () => {
+    const readResourceHandler = mockServerInstance.setRequestHandler.mock.calls.find(
+      (call: any) => call[0] === ReadResourceRequestSchema
+    )?.[1];
+
+    const mockClient = {
+      readResource: jest.fn().mockResolvedValue({
+        contents: [{ uri: 'https://example.com/path?q=1#frag', text: 'Complex content' }]
+      }),
+    };
+
+    const mockManagedClient = {
+      prefix: 'test-prefix',
+      getClient: jest.fn().mockResolvedValue(mockClient)
+    };
+
+    // @ts-ignore
+    router.managedClients.set('test-prefix', mockManagedClient);
+
+    const request = {
+      params: {
+        uri: 'mcp://test-prefix/https/example.com/path?q=1#frag'
+      }
+    };
+
+    const result = await readResourceHandler(request);
+
+    expect(mockClient.readResource).toHaveBeenCalledWith({
+      uri: 'https://example.com/path?q=1#frag'
+    });
+    expect(result.contents[0].text).toBe('Complex content');
+  });
 });

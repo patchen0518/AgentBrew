@@ -324,8 +324,8 @@ export class Router {
         }
       }
 
+      // Check for direct mapping first (optimistic/performance)
       const mapping = this.resourceToClient.get(uri);
-      
       if (mapping) {
         const managed = this.managedClients.get(mapping.prefix);
         if (managed) {
@@ -334,27 +334,13 @@ export class Router {
         }
       }
 
-      // Add logic to parse mcp://prefix/scheme/path for templated resources
-      if (uri.startsWith('mcp://')) {
-        const parts = uri.substring(6).split('/');
-        if (parts.length >= 2) {
-          const prefix = parts[0];
-          const scheme = parts[1];
-          let originalUri: string;
-          
-          if (scheme === 'raw') {
-            originalUri = parts.slice(2).join('/');
-          } else {
-            // Reconstruct: scheme://path
-            // Note: parts.slice(2).join('/') will include the host and pathname
-            originalUri = `${scheme}://${parts.slice(2).join('/')}`;
-          }
-          
-          const managed = this.managedClients.get(prefix);
-          if (managed) {
-            const client = await managed.getClient();
-            return await client.readResource({ uri: originalUri });
-          }
+      // Fallback to unscoping for templated or unknown URIs
+      const unscoped = this.unscopeUri(uri);
+      if (unscoped) {
+        const managed = this.managedClients.get(unscoped.prefix);
+        if (managed) {
+          const client = await managed.getClient();
+          return await client.readResource({ uri: unscoped.originalUri });
         }
       }
 
@@ -369,7 +355,7 @@ export class Router {
           const result = await client.listResourceTemplates();
           allTemplates.push(...result.resourceTemplates.map(t => ({
             ...t,
-            uriTemplate: `mcp://${prefix}/${t.uriTemplate.replace('://', '/')}`
+            uriTemplate: this.scopeUri(prefix, t.uriTemplate)
           })));
         } catch (e) {
           Logger.error(`Failed to list resource templates for ${prefix}: ${e}`);
@@ -380,14 +366,42 @@ export class Router {
   }
 
   private scopeUri(prefix: string, uri: string): string {
-    // If it's a standard MCP URI, inject prefix into authority or path
-    // Simple approach: agentbrew://prefix/original_scheme/rest_of_uri
+    const protocolIndex = uri.indexOf('://');
+    if (protocolIndex !== -1) {
+      const scheme = uri.substring(0, protocolIndex);
+      const rest = uri.substring(protocolIndex + 3);
+      return `mcp://${prefix}/${scheme}/${rest}`;
+    }
+    return `mcp://${prefix}/raw/${uri}`;
+  }
+
+  private unscopeUri(uri: string): { prefix: string, originalUri: string } | null {
     try {
-        const url = new URL(uri);
-        return `mcp://${prefix}/${url.protocol.replace(':', '')}/${url.host}${url.pathname}${url.search}`;
+      const url = new URL(uri);
+      if (url.protocol !== 'mcp:') return null;
+
+      const prefix = url.host;
+      const pathname = url.pathname; // e.g., /https/example.com/path
+      const parts = pathname.split('/');
+      if (parts.length < 2) return null;
+
+      const scheme = parts[1];
+      const rest = parts.slice(2).join('/');
+      
+      let originalUri: string;
+      if (scheme === 'raw') {
+        originalUri = rest;
+      } else {
+        originalUri = `${scheme}://${rest}`;
+      }
+      
+      // Re-add search and hash if they exist
+      originalUri += url.search;
+      originalUri += url.hash;
+
+      return { prefix, originalUri };
     } catch (e) {
-        // Fallback for non-standard URIs
-        return `mcp://${prefix}/raw/${uri}`;
+      return null;
     }
   }
 
