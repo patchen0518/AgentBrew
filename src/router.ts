@@ -21,9 +21,21 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { Logger } from './logger';
 
+export enum ClientStatus {
+  DISCONNECTED = 'DISCONNECTED',
+  CONNECTING = 'CONNECTING',
+  CONNECTED = 'CONNECTED',
+  RETRYING = 'RETRYING',
+  FAILED = 'FAILED'
+}
+
 export class ManagedClient {
   private client: Client | null = null;
   private transport: StdioClientTransport | null = null;
+  private status: ClientStatus = ClientStatus.DISCONNECTED;
+  private retryCount: number = 0;
+  private lastError: string | null = null;
+  private maxRetries: number = 3;
 
   constructor(
     public prefix: string,
@@ -32,27 +44,71 @@ export class ManagedClient {
   ) {}
 
   async getClient(): Promise<Client> {
-    if (this.client) return this.client;
+    if (this.status === ClientStatus.FAILED) {
+      throw new Error(`[AgentBrew] Server '${this.prefix}' failed after ${this.maxRetries} attempts. Last error: ${this.lastError}`);
+    }
+    if (this.client && this.status === ClientStatus.CONNECTED) return this.client;
 
-    Logger.info(`Starting MCP server for ${this.prefix}...`);
-    this.transport = new StdioClientTransport({
-      command: this.serverConfig.command,
-      args: this.serverConfig.args,
-      env: this.serverConfig.env,
-      stderr: 'inherit',
-      cwd: this.pkgPath,
-    });
+    const wasRetrying = this.status === ClientStatus.RETRYING;
+    this.status = ClientStatus.CONNECTING;
 
-    this.client = new Client(
-      { name: "agentbrew-client", version: "1.0.0" },
-      { capabilities: {} }
-    );
+    try {
+      Logger.info(`Starting MCP server for ${this.prefix}...`);
+      this.transport = new StdioClientTransport({
+        command: this.serverConfig.command,
+        args: this.serverConfig.args,
+        env: this.serverConfig.env,
+        stderr: 'inherit',
+        cwd: this.pkgPath,
+      });
 
-    await this.client.connect(this.transport);
-    return this.client;
+      this.client = new Client(
+        { name: "agentbrew-client", version: "1.0.0" },
+        { capabilities: {} }
+      );
+
+      await this.client.connect(this.transport);
+      
+      this.status = ClientStatus.CONNECTED;
+      if (!wasRetrying) {
+        this.retryCount = 0;
+      }
+
+      // Add exit handler:
+      this.transport.onclose = () => {
+        if (this.status !== ClientStatus.DISCONNECTED) {
+            this.handleCrash();
+        }
+      };
+
+      return this.client;
+    } catch (e: any) {
+      this.lastError = e.message;
+      throw e;
+    }
+  }
+
+  private async handleCrash() {
+      this.status = ClientStatus.RETRYING;
+      if (this.retryCount < this.maxRetries) {
+          this.retryCount++;
+          Logger.info(`Server ${this.prefix} crashed. Retrying ${this.retryCount}/${this.maxRetries} in 2s...`);
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          try {
+              this.client = null;
+              this.transport = null;
+              await this.getClient();
+          } catch (e: any) {
+              this.lastError = e.message;
+          }
+      } else {
+          this.status = ClientStatus.FAILED;
+          Logger.error(`Server ${this.prefix} failed permanently after ${this.maxRetries} attempts.`);
+      }
   }
 
   async stop() {
+    this.status = ClientStatus.DISCONNECTED;
     if (this.client) {
       Logger.info(`Stopping MCP server for ${this.prefix}...`);
       await this.client.close();
@@ -62,7 +118,7 @@ export class ManagedClient {
   }
 
   isConnected(): boolean {
-    return this.client !== null;
+    return this.status === ClientStatus.CONNECTED;
   }
 }
 
