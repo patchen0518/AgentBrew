@@ -1,0 +1,16 @@
+{
+  "name": "agentbrew-marketplace",
+  "owner": {
+    "name": "Patrick Chen"
+  },
+  "plugins": [
+    {
+      "name": "agentbrew",
+      "source": {
+        "type": "github",
+        "repo": "patchen0518/AgentBrew"
+      },
+      "description": "Universal package manager and MCP multiplexer for AI agents."
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "agentbrew": {
+      "command": "node",
+      "args": [
+        "dist/cli.js"
+      ]
+    }
+  }
+}

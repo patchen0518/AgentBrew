@@ -1,0 +1,10 @@
+{
+  "name": "agentbrew",
+  "description": "Universal package manager and MCP multiplexer. Install, manage, and route to multiple MCP servers through a single hub.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Patrick Chen"
+  },
+  "repository": "https://github.com/patchen0518/AgentBrew",
+  "license": "MIT"
+}
