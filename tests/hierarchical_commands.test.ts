@@ -8,6 +8,8 @@ import path from 'path';
 // Mock registry, state, and fs
 jest.mock('../src/registry', () => ({
     discoverPackages: jest.fn(),
+    findManifests: jest.fn().mockReturnValue([]),
+    generateMcpManifest: jest.fn().mockResolvedValue({}),
 }));
 
 jest.mock('../src/state', () => ({

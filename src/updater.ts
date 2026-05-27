@@ -41,7 +41,13 @@ export async function updatePackage(packageName: string): Promise<boolean> {
   }
 
   const localHead = await git.revparse(['HEAD']);
-  const remoteHead = await git.revparse(['@{u}']);
+  let remoteHead: string;
+  try {
+    remoteHead = await git.revparse(['@{u}']);
+  } catch {
+    Logger.info(`Skipping '${packageName}': Branch has no upstream tracking configured.`);
+    return false;
+  }
 
   if (localHead === remoteHead) {
     Logger.info(`Package '${packageName}' is already up to date.`);

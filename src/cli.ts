@@ -5,7 +5,7 @@ import { installPackage } from './installer';
 import { updatePackage, updateAllPackages } from './updater';
 import { startRouter, ManagedClient } from './router';
 import { enablePackage, disablePackage, isPackageEnabled } from './state';
-import { discoverPackages, PackageInfo, findManifests, generateMcpManifest } from './registry';
+import { discoverPackages, PackageInfo, McpManifestCache, findManifests, generateMcpManifest } from './registry';
 import { runMigration, discoverExternalConfigs } from './migration';
 import fs from 'fs';
 import path from 'path';
@@ -116,7 +116,8 @@ program
   .command('list')
   .description('List installed packages and their capabilities')
   .argument('[packageName]', 'Optional: filter by package name')
-  .action(async (packageName?: string) => {
+  .option('-v, --verbose', 'Show tool, prompt, and resource counts from the capability cache')
+  .action(async (packageName: string | undefined, options: { verbose?: boolean }) => {
     let packages = discoverPackages(true); // include disabled
     if (packageName) {
       packages = packages.filter(p => p.packageName === packageName);
@@ -142,14 +143,22 @@ program
         const pkgEnabled = isPackageEnabled(pkgName);
         const status = pkgEnabled ? "[ENABLED]" : "[DISABLED]";
         Logger.info(`\n${status} ${pkgName}`);
-        
+
         for (const item of items) {
+            const cache = item.manifest as McpManifestCache;
+
             // MCP Servers
             if (item.manifest.servers) {
                 for (const srv of item.manifest.servers) {
                     const capEnabled = isPackageEnabled(pkgName, srv.name);
                     const capStatus = capEnabled ? "[ENABLED]" : "[DISABLED]";
                     Logger.info(`  ├── [MCP] ${srv.name} ${capStatus} - ${srv.description || ""}`);
+                    if (options.verbose && cache.discovered) {
+                        const tools = cache.discovered.tools?.[srv.name]?.length ?? 0;
+                        const prompts = cache.discovered.prompts?.[srv.name]?.length ?? 0;
+                        const resources = cache.discovered.resources?.[srv.name]?.length ?? 0;
+                        Logger.info(`  │         (${tools} tools, ${prompts} prompts, ${resources} resources)`);
+                    }
                 }
             }
             // Skills
@@ -276,6 +285,17 @@ program
             fs.rmSync(promptFilePath, { force: true });
           }
         }
+      }
+
+      // Delete the stale cache so findManifests falls back to the updated TOML
+      const cachePath = path.join(target.path, 'mcp-manifest.json');
+      if (fs.existsSync(cachePath)) {
+        fs.rmSync(cachePath, { force: true });
+      }
+      // Regenerate cache from the updated manifest
+      const manifests = findManifests(target.path, 2);
+      for (const m of manifests) {
+        await generateMcpManifest(m.path, m.manifest);
       }
 
       Logger.info(`Successfully uninstalled capability '${capability}' from package '${name}'`);

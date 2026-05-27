@@ -32,9 +32,12 @@ Thumbs.db
 .agentbrew/
 .gemini_security/
 
-#gemini
+#gemini/claude
 .gemini
 .antigravitycli
+.claude
+CLAUDE.md
+GEMINI.md
 
 #superpower docs
 docs

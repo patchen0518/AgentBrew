@@ -8,6 +8,23 @@ AI developers today face a fragmentation problem: every agent (Claude Code, Gemi
 
 **AgentBrew** solves this by acting as a **Universal "USB Hub"** for MCP. You install your tools once in AgentBrew, and all your agents can instantly access that same consistent set of capabilities. If you switch agents, your entire "brew" of tools and skills comes with you.
 
+### Data Flow
+
+```
+AI Agent (Claude, Gemini, Cursor)
+    │  stdio
+    ▼
+Router (src/router.ts)          ← MCP server exposed to agents
+    │
+    ├── CapabilityDispatch (src/dispatcher.ts)
+    │       Prefixes all names/URIs: "pkgName_serverName__toolName"
+    │       Serves local prompts (Markdown files) and resources (CLAUDE.md / GEMINI.md)
+    │
+    └── ManagedClient[] (one per child server)
+            Lazy-spawned child process via stdio
+            Auto-retries on crash (3 attempts, exponential backoff)
+```
+
 ## 🚀 Key Features
 - **Lazy Loading:** Servers only start when a tool is actually called.
 - **Auto-Discovery:** Automatically detects MCP servers in Node.js, Python, and Markdown projects.
@@ -75,12 +92,18 @@ API_TOKEN = "your-secret-token-here"
 # List all tools, prompts, and resources
 agentbrew list
 
-# Enable/Disable a package
-agentbrew enable <package-name>
-agentbrew disable <package-name>
+# List with tool/prompt/resource counts from the capability cache
+agentbrew list --verbose
 
-# Uninstall a package
+# Enable/Disable a package or a specific capability
+agentbrew enable <package-name>
+agentbrew enable <package-name> <capability>
+agentbrew disable <package-name>
+agentbrew disable <package-name> <capability>
+
+# Uninstall a package or a specific capability (cache is auto-refreshed)
 agentbrew uninstall <package-name>
+agentbrew uninstall <package-name> <capability>
 
 # Update a specific package or all packages
 agentbrew update <package-name>
@@ -131,7 +154,7 @@ For agents that use a configuration file (like **Claude Desktop** or other MCP c
 > ```
 
 ## 🏗 Architecture
-AgentBrew uses an `mcp-manifest.json` cache in each package directory to enable instant startup. The **Router** acts as a dynamic proxy, spawning child MCP processes on-demand and routing requests using a `prefix__name` convention.
+AgentBrew uses an `mcp-manifest.json` cache in each package directory to enable instant startup. The **Router** acts as a dynamic proxy, spawning child MCP processes on-demand and routing requests using a scoped naming convention: `{packageName}_{serverName}__{toolName}`. The `__` (double-underscore) is the reserved routing delimiter — package and server names must never contain it.
 
 ## 📄 License
 MIT

@@ -357,11 +357,11 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
     let isMcp = false;
     if (fs.existsSync(requirementsPath)) {
         const reqs = fs.readFileSync(requirementsPath, 'utf-8');
-        if (reqs.includes('mcp')) isMcp = true;
+        if (/\bmcp\b/i.test(reqs)) isMcp = true;
     }
     if (fs.existsSync(pyprojectPath)) {
         const pyproj = fs.readFileSync(pyprojectPath, 'utf-8');
-        if (pyproj.includes('mcp')) isMcp = true;
+        if (/\bmcp\b/i.test(pyproj)) isMcp = true;
     }
 
     if (isMcp) {
