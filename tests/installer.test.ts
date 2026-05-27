@@ -265,4 +265,30 @@ describe('Installer', () => {
     await expect(installPackage(url)).rejects.toThrow(/Authentication failed for private repository/);
     await expect(installPackage(url)).rejects.toThrow(/ssh-add -l/);
   });
+
+  test('fails installation and suggests credentials when generateMcpManifest connection throws error', async () => {
+    const url = 'https://github.com/user/auth-fail-repo.git';
+    const targetPath = getExpectedPath(url);
+
+    let authRepoExists = false;
+    (fs.existsSync as jest.Mock).mockImplementation((p: string) => {
+        if (p === targetPath) return authRepoExists;
+        if (p.endsWith('packages')) return true;
+        return false;
+    });
+
+    mockClone.mockImplementation(() => {
+        authRepoExists = true;
+        return Promise.resolve();
+    });
+
+    (registry.findManifests as jest.Mock).mockReturnValue([
+        { path: targetPath, manifest: { name: 'auth-fail-repo', version: '1.0.0' } }
+    ]);
+
+    (registry.generateMcpManifest as jest.Mock).mockRejectedValue(new Error('Connection timeout of 10s exceeded'));
+
+    await expect(installPackage(url)).rejects.toThrow(/This server may require API tokens or credentials/);
+    expect(fs.promises.rm).toHaveBeenCalledWith(targetPath, expect.objectContaining({ recursive: true }));
+  });
 });

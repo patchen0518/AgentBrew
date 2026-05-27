@@ -181,14 +181,13 @@ export async function installPackage(url: string, confirm?: (summary: { scripts:
                 validateName(prompt.name, 'prompt');
             }
         }
-        await generateMcpManifest(m.path, m.manifest);
+        await generateMcpManifest(m.path, m.manifest, true);
     }
     
     return targetPath;
   } catch (error: any) {
     let finalError = error;
     
-    // Provide a clearer message for authentication failures (common in private repos)
     const errorMsg = error.message || '';
     if (errorMsg.includes('Authentication failed') || errorMsg.includes('could not read Username') || errorMsg.includes('Permission denied (publickey)')) {
       finalError = new Error(
@@ -197,6 +196,13 @@ export async function installPackage(url: string, confirm?: (summary: { scripts:
         `  - If using SSH, ensure your keys are added (ssh-add -l).\n` +
         `  - If using HTTPS, ensure you have a credential helper configured or provide a token.\n` +
         `  - Git terminal prompts are disabled to prevent hanging.`
+      );
+    } else if (errorMsg.includes('timeout') || errorMsg.includes('Connection') || errorMsg.includes('Failed to connect') || errorMsg.includes('discover capabilities')) {
+      finalError = new Error(
+        `Installation failed due to connection or credential errors: ${errorMsg}\n` +
+        `Suggestions:\n` +
+        `  - This server may require API tokens or credentials to function correctly.\n` +
+        `  - Ensure all required environment variables and API tokens are set in your shell session, then try the installation again.`
       );
     }
 

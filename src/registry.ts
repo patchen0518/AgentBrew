@@ -62,7 +62,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, errorMessage: str
 /**
  * Discovers capabilities by briefly running the server and saves them to mcp-manifest.json.
  */
-export async function generateMcpManifest(pkgPath: string, manifest: PackageManifest): Promise<McpManifestCache> {
+export async function generateMcpManifest(pkgPath: string, manifest: PackageManifest, throwOnError = false): Promise<McpManifestCache> {
     const cache: McpManifestCache = { ...manifest, discovered: { tools: {}, prompts: {}, resources: {} } };
     
     // Add auto-detected prompts to discovered
@@ -138,6 +138,9 @@ export async function generateMcpManifest(pkgPath: string, manifest: PackageMani
                 try {
                     await transport.close();
                 } catch (closeErr) {}
+                if (throwOnError) {
+                    throw e;
+                }
             }
         }
     }

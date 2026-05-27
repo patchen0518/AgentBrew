@@ -43,6 +43,20 @@ agentbrew migrate
 # (Internal use or custom scripts)
 ```
 
+### 🔑 Dedicated Credentials
+For servers requiring custom or dedicated credentials, you can configure them directly in the package's `agentbrew.toml` manifest file inside the package folder:
+
+```toml
+# ~/.agentbrew/packages/linked-custom-server/agentbrew.toml
+[[servers]]
+name = "custom-server"
+command = "node"
+args = ["index.js"]
+[servers.env]
+API_TOKEN = "your-secret-token-here"
+```
+
+
 ### Managing the Hub
 ```bash
 # List all tools, prompts, and resources
