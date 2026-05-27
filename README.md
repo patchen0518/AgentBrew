@@ -102,6 +102,21 @@ For agents that use a configuration file (like **Claude Desktop** or other MCP c
 }
 ```
 
+> [!TIP]
+> **Path Resolution Fallback:**
+> If your agent cannot resolve the global `agentbrew` command (e.g., throwing a "command not found" or "executable not found" error during startup), you can configure the server to run via `node` directly using the absolute path to your compiled `cli.js` file:
+>
+> ```json
+> {
+>   "mcpServers": {
+>     "agentbrew": {
+>       "command": "node",
+>       "args": ["/absolute/path/to/AgentBrew/dist/cli.js"]
+>     }
+>   }
+> }
+> ```
+
 ## 🏗 Architecture
 AgentBrew uses an `mcp-manifest.json` cache in each package directory to enable instant startup. The **Router** acts as a dynamic proxy, spawning child MCP processes on-demand and routing requests using a `prefix__name` convention.
 
