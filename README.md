@@ -16,18 +16,31 @@ AI developers today face a fragmentation problem: every agent (Claude Code, Gemi
 
 ## 🛠 Installation
 
+### 📦 Via npm Registry (Recommended)
+
+You can install AgentBrew globally with a single command:
+
+```bash
+npm install -g @patchen0518/agentbrew
+```
+
+### 🔨 Manual Development Setup
+
+If you are developing or contributing to AgentBrew, you can clone and build the repository locally:
+
 ```bash
 # Clone and enter the repo
 git clone https://github.com/patchen0518/AgentBrew.git
 cd AgentBrew
 
-# Install and build
+# Install dependencies and build
 npm install
 npm run build
 
-# Link globally
+# Link the local build globally
 npm link
 ```
+
 
 ## 📖 Usage
 
