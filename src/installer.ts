@@ -294,7 +294,7 @@ export async function resolveDependencies(pkgPath: string) {
   }
 }
 
-export async function createLinkPackage(name: string, command: string, args: string[], env?: Record<string, string>) {
+export async function createLinkPackage(name: string, command: string, args: string[], env?: Record<string, string>, cwd?: string) {
   validateName(name, 'package');
   // Basic validation to prevent path traversal
   if (name.includes('..') || name.includes('/') || name.includes('\\')) {
@@ -327,7 +327,8 @@ export async function createLinkPackage(name: string, command: string, args: str
         command,
         args,
         description: `Linked server: ${name}`,
-        env: env && Object.keys(env).length > 0 ? env : undefined
+        env: env && Object.keys(env).length > 0 ? env : undefined,
+        cwd: cwd
       }
     ]
   };

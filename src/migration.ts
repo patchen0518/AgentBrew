@@ -14,6 +14,7 @@ export interface DiscoveredServer {
   env?: Record<string, string>;
   source: string;
   repoUrl?: string;
+  cwd?: string;
 }
 
 export interface DiscoveredSkill {
@@ -35,6 +36,13 @@ export async function runMigration(): Promise<DiscoveryResult | undefined> {
     return undefined;
   }
 
+  // Print descriptive notice detailing the difference between copied skills and linked references for servers
+  Logger.info("\n--- AgentBrew Migration ---");
+  Logger.info("How Migration Works:");
+  Logger.info("1. Skills (Markdown files) are copied into AgentBrew's directory to ensure they remain functional and independent.");
+  Logger.info("2. Servers are linked as references to their original executables and run directories, avoiding duplication.");
+  Logger.info("---------------------------\n");
+
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -47,8 +55,8 @@ export async function runMigration(): Promise<DiscoveryResult | undefined> {
       const answer = (await question(`Found ${srv.source} server '${srv.name}'. Migrate? [L]ink, [I]nstall (if Git), [S]kip: `)).toLowerCase();
       if (answer === 'l') {
         try {
-          await createLinkPackage(srv.name, srv.command, srv.args, srv.env);
-          Logger.info(`Successfully linked ${srv.name}`);
+          await createLinkPackage(srv.name, srv.command, srv.args, srv.env, srv.cwd);
+          Logger.info(`Successfully linked ${srv.name} (referencing original directory: ${srv.cwd || 'default'})`);
         } catch (e: any) {
           Logger.error(`Failed to link ${srv.name}: ${e.message}`);
         }
@@ -56,15 +64,15 @@ export async function runMigration(): Promise<DiscoveryResult | undefined> {
         if (srv.repoUrl) {
           try {
             await installPackage(srv.repoUrl);
-            Logger.info(`Successfully installed ${srv.name} from ${srv.repoUrl}`);
+            Logger.info(`Successfully installed ${srv.name} from repository ${srv.repoUrl}`);
           } catch (e: any) {
             Logger.error(`Failed to install ${srv.name}: ${e.message}`);
           }
         } else {
           Logger.info(`No repository URL found for ${srv.name}, falling back to Link...`);
           try {
-            await createLinkPackage(srv.name, srv.command, srv.args, srv.env);
-            Logger.info(`Successfully linked ${srv.name}`);
+            await createLinkPackage(srv.name, srv.command, srv.args, srv.env, srv.cwd);
+            Logger.info(`Successfully linked ${srv.name} (referencing original directory: ${srv.cwd || 'default'})`);
           } catch (e: any) {
             Logger.error(`Failed to link ${srv.name}: ${e.message}`);
           }
@@ -148,6 +156,7 @@ export function discoverExternalConfigs(): DiscoveryResult {
               args: sc.args || [],
               env: sc.env,
               source: 'Gemini',
+              cwd: sc.cwd,
             });
           }
         }
@@ -229,7 +238,8 @@ export function discoverExternalConfigs(): DiscoveryResult {
                 args: mcpConfig.args || [],
                 env: mcpConfig.env,
                 source: 'Claude',
-                repoUrl
+                repoUrl,
+                cwd: mcpConfig.cwd || installPath,
               });
             } catch (e) {
               Logger.error(`Failed to parse Claude MCP config at ${mcpJsonPath}:`, e);
@@ -274,6 +284,7 @@ export function discoverExternalConfigs(): DiscoveryResult {
             args: sc.args || [],
             env: sc.env,
             source: 'Cursor',
+            cwd: sc.cwd,
           });
         }
       }

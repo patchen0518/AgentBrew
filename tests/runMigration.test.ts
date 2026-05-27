@@ -76,7 +76,7 @@ describe('runMigration', () => {
 
     const result = await runMigration();
 
-    expect(createLinkPackage).toHaveBeenCalledWith('test-srv', 'node', [], undefined);
+    expect(createLinkPackage).toHaveBeenCalledWith('test-srv', 'node', [], undefined, undefined);
     expect(Logger.info).toHaveBeenCalledWith(expect.stringContaining('Successfully linked test-srv'));
     expect(rlMock.close).toHaveBeenCalled();
     expect(result).toBeDefined();

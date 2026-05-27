@@ -55,4 +55,48 @@ describe('ManagedClient Environment Support', () => {
       cwd: pkgPath
     }));
   });
+
+  test('passes custom cwd to StdioClientTransport', async () => {
+    const router = new Router();
+    const pkgPath = '/tmp/pkg';
+    const customCwd = '/custom/cwd/path';
+    const serverConfig = {
+      name: 'srv',
+      command: 'node',
+      args: ['index.js'],
+      cwd: customCwd
+    };
+
+    // @ts-ignore
+    router.registerPackage({
+      packageName: 'test-pkg-cwd',
+      subPath: '',
+      path: pkgPath,
+      manifest: {
+        name: 'test-pkg-cwd',
+        version: '1.0.0',
+        servers: [serverConfig]
+      },
+      isEnabled: true
+    });
+
+    const prefix = 'test-pkg-cwd_srv';
+    // @ts-ignore
+    const managedClient = router.managedClients.get(prefix);
+    
+    expect(managedClient).toBeDefined();
+
+    // Mock Client connect
+    (Client as jest.Mock).prototype.connect = jest.fn().mockResolvedValue(undefined);
+
+    if (managedClient) {
+      await managedClient.getClient();
+    }
+
+    expect(StdioClientTransport).toHaveBeenCalledWith(expect.objectContaining({
+      command: 'node',
+      args: ['index.js'],
+      cwd: customCwd
+    }));
+  });
 });

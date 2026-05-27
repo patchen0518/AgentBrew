@@ -18,6 +18,7 @@ export interface PackageManifest {
     description?: string;
     build_command?: string;
     env?: Record<string, string>;
+    cwd?: string;
   }[];
   prompts?: {
     name: string;

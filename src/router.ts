@@ -41,7 +41,7 @@ export class ManagedClient {
   constructor(
     public prefix: string,
     private pkgPath: string,
-    private serverConfig: { command: string; args: string[]; env?: Record<string, string> }
+    private serverConfig: { command: string; args: string[]; env?: Record<string, string>; cwd?: string }
   ) {}
 
   private async spawnClient(wasRetrying: boolean): Promise<Client> {
@@ -51,7 +51,7 @@ export class ManagedClient {
       args: this.serverConfig.args,
       env: this.serverConfig.env,
       stderr: 'inherit',
-      cwd: this.pkgPath,
+      cwd: this.serverConfig.cwd || this.pkgPath,
     });
 
     this.client = new Client(

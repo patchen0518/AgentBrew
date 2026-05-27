@@ -87,4 +87,24 @@ describe('createLinkPackage', () => {
     await expect(createLinkPackage(name, command, args))
       .rejects.toThrow(/already installed/);
   });
+
+  test('handles optional cwd and writes it to TOML', async () => {
+    const name = 'cwd-server';
+    const command = 'node';
+    const args = ['app.js'];
+    const env = { KEY: 'VAL' };
+    const cwd = '/my/custom/path';
+
+    const expectedDirName = `linked-${name}`;
+    const expectedPath = path.join(PACKAGES_DIR, expectedDirName);
+
+    // @ts-ignore
+    await createLinkPackage(name, command, args, env, cwd);
+
+    expect(fs.promises.writeFile).toHaveBeenCalledWith(
+      path.join(expectedPath, 'agentbrew.toml'),
+      expect.stringContaining(`cwd = "${cwd}"`),
+      'utf-8'
+    );
+  });
 });
