@@ -40,6 +40,7 @@ export interface McpManifestCache extends PackageManifest {
     tools?: Record<string, any[]>;     // serverName -> Tool[]
     prompts?: Record<string, any[]>;   // serverName -> Prompt[]
     resources?: Record<string, any[]>; // serverName -> Resource[]
+    resourceTemplates?: Record<string, any[]>; // serverName -> ResourceTemplate[]
   }
 }
 
@@ -63,7 +64,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, errorMessage: str
  * Discovers capabilities by briefly running the server and saves them to mcp-manifest.json.
  */
 export async function generateMcpManifest(pkgPath: string, manifest: PackageManifest, throwOnError = false): Promise<McpManifestCache> {
-    const cache: McpManifestCache = { ...manifest, discovered: { tools: {}, prompts: {}, resources: {} } };
+    const cache: McpManifestCache = { ...manifest, discovered: { tools: {}, prompts: {}, resources: {}, resourceTemplates: {} } };
     
     // Add auto-detected prompts to discovered
     if (manifest.prompts) {
@@ -104,6 +105,7 @@ export async function generateMcpManifest(pkgPath: string, manifest: PackageMani
                 let toolsList: any[] = [];
                 let promptsList: any[] = [];
                 let resourcesList: any[] = [];
+                let resourceTemplatesList: any[] = [];
 
                 try {
                     const result = await client.listTools();
@@ -126,10 +128,19 @@ export async function generateMcpManifest(pkgPath: string, manifest: PackageMani
                     Logger.info(`Server ${server.name} does not support resources discovery: ${e.message}`);
                 }
 
+                try {
+                    const result = await client.listResourceTemplates();
+                    resourceTemplatesList = result.resourceTemplates || [];
+                } catch (e: any) {
+                    Logger.info(`Server ${server.name} does not support resource templates discovery: ${e.message}`);
+                }
+
                 if (cache.discovered) {
                     cache.discovered.tools![server.name] = toolsList;
                     cache.discovered.prompts![server.name] = promptsList;
                     cache.discovered.resources![server.name] = resourcesList;
+                    cache.discovered.resourceTemplates = cache.discovered.resourceTemplates || {};
+                    cache.discovered.resourceTemplates[server.name] = resourceTemplatesList;
                 }
 
                 await client.close();

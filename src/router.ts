@@ -175,6 +175,7 @@ export class Router {
   private cachedTools: Map<string, Tool[]> = new Map();
   private cachedPrompts: Map<string, Prompt[]> = new Map();
   private cachedResources: Map<string, Resource[]> = new Map();
+  private cachedResourceTemplates: Map<string, ResourceTemplate[]> = new Map();
 
   constructor() {
     this.mcpServer = new Server(
@@ -380,17 +381,11 @@ export class Router {
 
     this.mcpServer.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
       const allTemplates: ResourceTemplate[] = [];
-      for (const [prefix, managed] of this.managedClients.entries()) {
-        try {
-          const client = await managed.getClient();
-          const result = await client.listResourceTemplates();
-          allTemplates.push(...result.resourceTemplates.map(t => ({
-            ...t,
-            uriTemplate: this.scopeUri(prefix, t.uriTemplate)
-          })));
-        } catch (e) {
-          Logger.error(`Failed to list resource templates for ${prefix}: ${e}`);
-        }
+      for (const [prefix, templates] of this.cachedResourceTemplates.entries()) {
+        allTemplates.push(...templates.map(t => ({
+          ...t,
+          uriTemplate: this.scopeUri(prefix, t.uriTemplate)
+        })));
       }
       return { resourceTemplates: allTemplates };
     });
@@ -506,6 +501,9 @@ export class Router {
                     const scopedUri = this.scopeUri(prefix, resource.uri);
                     this.resourceToClient.set(scopedUri, { prefix, originalUri: resource.uri });
                 }
+            }
+            if (cache.discovered.resourceTemplates?.[server.name]) {
+                this.cachedResourceTemplates.set(prefix, cache.discovered.resourceTemplates[server.name]);
             }
         }
       }

@@ -155,35 +155,36 @@ describe('Router Resource Routing', () => {
     router = new Router();
   });
 
-  test('lists and transforms resource templates', async () => {
+  test('lists and transforms resource templates lazily from cache', async () => {
     const listTemplatesHandler = mockServerInstance.setRequestHandler.mock.calls.find(
       (call: any) => call[0] === ListResourceTemplatesRequestSchema
     )?.[1];
 
-    const mockClient = {
-      listResourceTemplates: jest.fn().mockResolvedValue({
-        resourceTemplates: [
-          {
-            uriTemplate: 'myscheme://{path}',
-            name: 'Test Template',
-            description: 'A test template'
-          }
-        ]
-      }),
-    };
-
     const mockManagedClient = {
       prefix: 'test-prefix',
-      getClient: jest.fn().mockResolvedValue(mockClient)
+      getClient: jest.fn()
     };
 
     // @ts-ignore
     router.managedClients.set('test-prefix', mockManagedClient);
 
+    // Set cached resource templates directly to simulate registration from mcp-manifest.json
+    // @ts-ignore
+    router.cachedResourceTemplates.set('test-prefix', [
+      {
+        uriTemplate: 'myscheme://{path}',
+        name: 'Test Template',
+        description: 'A test template'
+      }
+    ]);
+
     const result = await listTemplatesHandler();
 
     expect(result.resourceTemplates).toHaveLength(1);
     expect(result.resourceTemplates[0].uriTemplate).toBe('mcp://test-prefix/myscheme/{path}');
+    
+    // VERIFY: The client process was NOT spawned (lazy loading is preserved)
+    expect(mockManagedClient.getClient).not.toHaveBeenCalled();
   });
 
   test('proxies readResource for templated URIs', async () => {

@@ -73,4 +73,50 @@ describe('generateMcpManifest Timeout', () => {
     // Verify it still writes manifest to cache
     expect(fs.writeFileSync).toHaveBeenCalled();
   });
+
+  test('generateMcpManifest discovers and caches resource templates successfully', async () => {
+    const mockTransport = {
+      close: jest.fn().mockResolvedValue(undefined),
+    };
+    (StdioClientTransport as jest.Mock).mockImplementation(() => mockTransport);
+
+    const mockClient = {
+      connect: jest.fn().mockResolvedValue(undefined),
+      listTools: jest.fn().mockResolvedValue({ tools: [] }),
+      listPrompts: jest.fn().mockResolvedValue({ prompts: [] }),
+      listResources: jest.fn().mockResolvedValue({ resources: [] }),
+      listResourceTemplates: jest.fn().mockResolvedValue({
+        resourceTemplates: [
+          {
+            uriTemplate: 'myscheme://{path}',
+            name: 'Test Template',
+            description: 'A test template'
+          }
+        ]
+      }),
+      close: jest.fn().mockResolvedValue(undefined),
+    };
+    (Client as jest.Mock).mockImplementation(() => mockClient);
+
+    const manifest = {
+      name: 'test-pkg',
+      version: '1.0.0',
+      servers: [
+        {
+          name: 'test-server',
+          command: 'node',
+          args: [],
+        }
+      ]
+    };
+
+    const cache = await generateMcpManifest('/tmp/pkg', manifest);
+
+    expect(mockClient.listResourceTemplates).toHaveBeenCalled();
+    expect(cache.discovered).toBeDefined();
+    expect(cache.discovered?.resourceTemplates).toBeDefined();
+    expect(cache.discovered?.resourceTemplates?.['test-server']).toHaveLength(1);
+    expect(cache.discovered?.resourceTemplates?.['test-server'][0].uriTemplate).toBe('myscheme://{path}');
+  });
 });
+
