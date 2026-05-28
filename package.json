@@ -1,6 +1,6 @@
 {
   "name": "@patchen0518/agentbrew",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "The Universal Hub and Multiplexer for AI Agent MCP Servers and Skills",
   "main": "dist/cli.js",
   "bin": {
