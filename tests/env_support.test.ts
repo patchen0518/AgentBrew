@@ -51,9 +51,18 @@ describe('ManagedClient Environment Support', () => {
     expect(StdioClientTransport).toHaveBeenCalledWith(expect.objectContaining({
       command: 'node',
       args: ['index.js'],
-      env: { TEST_KEY: 'TEST_VALUE' },
       cwd: pkgPath
     }));
+
+    const spawnedEnv = (StdioClientTransport as jest.Mock).mock.calls[0][0].env;
+    // Server-defined vars must be present
+    expect(spawnedEnv).toMatchObject({ TEST_KEY: 'TEST_VALUE', GIT_TERMINAL_PROMPT: '0' });
+    // Interactive/display vars that sandboxes block must be stripped
+    expect(spawnedEnv).not.toHaveProperty('EDITOR');
+    expect(spawnedEnv).not.toHaveProperty('GIT_EDITOR');
+    expect(spawnedEnv).not.toHaveProperty('VISUAL');
+    expect(spawnedEnv).not.toHaveProperty('PAGER');
+    expect(spawnedEnv).not.toHaveProperty('GIT_PAGER');
   });
 
   test('passes custom cwd to StdioClientTransport', async () => {
