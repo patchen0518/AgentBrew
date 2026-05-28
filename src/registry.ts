@@ -6,6 +6,7 @@ import { Logger } from './logger';
 import { getPackagesDir } from './config';
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { buildSubprocessEnv } from './installer';
 
 export interface PackageManifest {
   name: string;
@@ -89,7 +90,10 @@ export async function generateMcpManifest(pkgPath: string, manifest: PackageMani
             const transport = new StdioClientTransport({
                 command: server.command,
                 args: server.args,
-                env: server.env,
+                env: Object.fromEntries(
+                    Object.entries({ ...buildSubprocessEnv(), ...server.env })
+                        .filter((e): e is [string, string] => e[1] !== undefined)
+                ),
                 cwd: pkgPath,
                 stderr: 'inherit'
             });

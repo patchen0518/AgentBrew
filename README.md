@@ -65,7 +65,9 @@ npm link
 ```bash
 # Install a tool from a Git URL
 agentbrew install <github-url>
+```
 
+```bash
 # Migrate from Gemini, Claude, or Cursor
 agentbrew migrate
 
@@ -111,6 +113,9 @@ agentbrew update --all
 
 # Refresh capability cache (required after manual file changes)
 agentbrew refresh
+
+# Refresh and re-run dependency installation (use after a manual git clone)
+agentbrew refresh --install
 ```
 
 ## 🤖 Connecting Agents

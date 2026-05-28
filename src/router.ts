@@ -21,6 +21,7 @@ import {
   ResourceTemplate,
 } from "@modelcontextprotocol/sdk/types.js";
 import { Logger } from './logger';
+import { buildSubprocessEnv } from './installer';
 
 export enum ClientStatus {
   DISCONNECTED = 'DISCONNECTED',
@@ -50,7 +51,10 @@ export class ManagedClient {
     this.transport = new StdioClientTransport({
       command: this.serverConfig.command,
       args: this.serverConfig.args,
-      env: this.serverConfig.env,
+      env: Object.fromEntries(
+        Object.entries({ ...buildSubprocessEnv(), ...this.serverConfig.env })
+          .filter((e): e is [string, string] => e[1] !== undefined)
+      ),
       stderr: 'inherit',
       cwd: this.serverConfig.cwd || this.pkgPath,
     });

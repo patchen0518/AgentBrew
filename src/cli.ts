@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // src/cli.ts
 import { Command } from 'commander';
-import { installPackage } from './installer';
+import { installPackage, resolveDependencies } from './installer';
 import { updatePackage, updateAllPackages } from './updater';
 import { startRouter, ManagedClient } from './router';
 import { enablePackage, disablePackage, isPackageEnabled } from './state';
@@ -41,7 +41,8 @@ program
 program
   .command('refresh')
   .description('Refresh the capability cache for all installed packages')
-  .action(async () => {
+  .option('--install', 'Also re-run dependency installation for each package (use after a manual clone)')
+  .action(async (opts: { install?: boolean }) => {
     const packages = discoverPackages(true);
     if (packages.length === 0) {
       Logger.info("No packages to refresh.");
@@ -53,7 +54,12 @@ program
 
     for (const pkg of packages) {
       if (refreshedPaths.has(pkg.path)) continue;
-      
+
+      if (opts.install) {
+        Logger.info(`Installing dependencies for ${pkg.packageName}...`);
+        await resolveDependencies(pkg.path);
+      }
+
       Logger.info(`Refreshing cache for ${pkg.packageName}...`);
       const manifests = findManifests(pkg.path, 2);
       for (const m of manifests) {

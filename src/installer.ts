@@ -106,6 +106,18 @@ function validateName(name: string, context: string) {
   }
 }
 
+export function buildSubprocessEnv(): Record<string, string | undefined> {
+  const env = { ...process.env };
+  // Strip interactive/display vars that sandboxes commonly block and that
+  // git/npm never need for a non-interactive install.
+  for (const key of ['EDITOR', 'GIT_EDITOR', 'VISUAL', 'PAGER', 'GIT_PAGER']) {
+    delete env[key];
+  }
+  env.GIT_TERMINAL_PROMPT = '0';
+  env.CI = env.CI ?? '1';
+  return env;
+}
+
 export async function analyzePackage(pkgPath: string) {
     const scripts: string[] = [];
     const packageJsonPath = path.join(pkgPath, 'package.json');
@@ -145,12 +157,7 @@ export async function installPackage(url: string, confirm?: (summary: { scripts:
     throw new Error(`Package '${repoName}' is already installed at ${targetPath}. Uninstall it first to install a different version.`);
   }
 
-  const gitEnv: Record<string, string | undefined> = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
-  // Simple-git's argv-parser blocks PAGER/GIT_PAGER by default for security
-  delete gitEnv.PAGER;
-  delete gitEnv.GIT_PAGER;
-
-  const git = simpleGit().env(gitEnv);
+  const git = simpleGit().env(buildSubprocessEnv());
   try {
     Logger.info(`Cloning ${safeLogUrl} into ${targetPath}...`);
     await git.clone(sanitizedUrl, targetPath);
@@ -245,7 +252,7 @@ export async function resolveDependencies(pkgPath: string) {
     packageManager = 'npm';
   }
 
-  const execOpts = { cwd: pkgPath, maxBuffer: 1024 * 1024 * 50, timeout: INSTALL_TIMEOUT };
+  const execOpts = { cwd: pkgPath, env: buildSubprocessEnv(), maxBuffer: 1024 * 1024 * 50, timeout: INSTALL_TIMEOUT };
 
   if (packageManager) {
     await ensurePackageManager(packageManager);
