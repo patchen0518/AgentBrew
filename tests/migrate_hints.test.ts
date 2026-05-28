@@ -55,7 +55,7 @@ describe('CLI Migrate Hints', () => {
     await program.parseAsync(['node', 'agentbrew', 'migrate']);
 
     expect(Logger.info).toHaveBeenCalledWith(expect.stringContaining('For Cursor:'));
-    expect(Logger.info).toHaveBeenCalledWith(expect.stringContaining('Add a new MCP server in Cursor settings'));
+    expect(Logger.info).toHaveBeenCalledWith(expect.stringContaining('Open Cursor Settings > MCP'));
     
     exitMock.mockRestore();
   });

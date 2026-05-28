@@ -401,14 +401,22 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
     }
   }
 
-  // Detect instruction files (GEMINI.md, CLAUDE.md)
-  const instructionFiles = ['GEMINI.md', 'CLAUDE.md'];
+  // Detect per-agent instruction files shipped inside a package.
+  // Each agent auto-loads its own file when it reads resources from AgentBrew.
+  const instructionFiles = [
+    'CLAUDE.md',       // Claude Code
+    'GEMINI.md',       // Gemini CLI
+    'AGENTS.md',       // OpenAI Codex CLI
+    '.cursorrules',    // Cursor (legacy single-file format; directory rules in .cursor/rules/ are served separately)
+    '.windsurfrules',  // Windsurf (legacy; newer versions also use .windsurf/rules/)
+    '.clinerules',     // Roo Code / Cline
+  ];
   for (const file of instructionFiles) {
     const filePath = path.join(pkgPath, file);
     if (fs.existsSync(filePath)) {
       manifest.instructions = manifest.instructions || [];
       manifest.instructions.push({
-        name: path.parse(file).name,
+        name: path.parse(file).name || file, // .cursorrules has no stem; use full name
         file: file
       });
     }
@@ -430,7 +438,7 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
                       detectSkillsRecursive(fullPath, baseDir);
                   }
               } else if (file.endsWith('.md')) {
-                  if (!instructionFiles.includes(file.toUpperCase()) && file.toLowerCase() !== 'readme.md') {
+                  if (!instructionFiles.some(f => f.toLowerCase() === file.toLowerCase()) && file.toLowerCase() !== 'readme.md') {
                       let description = `Markdown skill: ${relativePath}`;
                       try {
                           const firstLines = fs.readFileSync(fullPath, 'utf-8').split('\n');

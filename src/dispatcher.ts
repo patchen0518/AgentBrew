@@ -111,7 +111,7 @@ export class CapabilityDispatch {
     if (this.localResources.size > 0) {
       allPrompts.push({
         name: 'agentbrew__instruction_index',
-        description: 'Index of instruction files (GEMINI.md, CLAUDE.md) for all installed tools.'
+        description: 'Index of agent instruction files (CLAUDE.md, GEMINI.md, AGENTS.md, .cursorrules, .windsurfrules, .clinerules) for all installed packages.'
       });
     }
 

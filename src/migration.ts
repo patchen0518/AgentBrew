@@ -293,6 +293,55 @@ export function discoverExternalConfigs(): DiscoveryResult {
     }
   }
 
+  // 4. Windsurf — MCP servers stored in ~/.codeium/windsurf/mcp_config.json
+  const windsurfConfig = path.join(home, '.codeium', 'windsurf', 'mcp_config.json');
+  if (fs.existsSync(windsurfConfig)) {
+    try {
+      const content = fs.readFileSync(windsurfConfig, 'utf-8');
+      const config = JSON.parse(content);
+      if (config.mcpServers && typeof config.mcpServers === 'object' && !Array.isArray(config.mcpServers)) {
+        for (const [name, serverConfig] of Object.entries(config.mcpServers as Record<string, any>)) {
+          const sc = serverConfig as any;
+          result.servers.push({
+            name,
+            command: sc.command,
+            args: sc.args || [],
+            env: sc.env,
+            source: 'Windsurf',
+            cwd: sc.cwd,
+          });
+        }
+      }
+    } catch (e) {
+      Logger.error(`Failed to parse Windsurf config at ${windsurfConfig}:`, e);
+    }
+  }
+
+  // 5. OpenAI Codex CLI — MCP servers stored in ~/.codex/config.toml
+  const codexConfig = path.join(home, '.codex', 'config.toml');
+  if (fs.existsSync(codexConfig)) {
+    try {
+      const content = fs.readFileSync(codexConfig, 'utf-8');
+      const config = toml.parse(content) as any;
+      const mcpServers = config.mcp_servers;
+      if (mcpServers && typeof mcpServers === 'object' && !Array.isArray(mcpServers)) {
+        for (const [name, serverConfig] of Object.entries(mcpServers as Record<string, any>)) {
+          const sc = serverConfig as any;
+          result.servers.push({
+            name,
+            command: sc.command,
+            args: sc.args || [],
+            env: sc.env,
+            source: 'OpenAI Codex CLI',
+            cwd: sc.cwd,
+          });
+        }
+      }
+    } catch (e) {
+      Logger.error(`Failed to parse Codex CLI config at ${codexConfig}:`, e);
+    }
+  }
+
   return result;
 }
 

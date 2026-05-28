@@ -7,6 +7,7 @@ import { startRouter, ManagedClient } from './router';
 import { enablePackage, disablePackage, isPackageEnabled } from './state';
 import { discoverPackages, PackageInfo, McpManifestCache, findManifests, generateMcpManifest } from './registry';
 import { runMigration, discoverExternalConfigs } from './migration';
+import { syncInstructions, unsyncInstructions, getInstructionsPath } from './sync';
 import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
@@ -313,7 +314,7 @@ program
 
 program
   .command('migrate')
-  .description('Migrate configurations and skills from other platforms (Gemini, Claude, Cursor)')
+  .description('Migrate configurations and skills from other platforms (Gemini, Claude, Cursor, Windsurf)')
   .option('--dry-run', 'List discovered configurations without performing migration')
   .action(async (options) => {
     if (options.dryRun) {
@@ -350,23 +351,100 @@ program
           Logger.info("\nFor Gemini CLI:");
           Logger.info("  gemini mcp add agentbrew agentbrew");
         }
-        
+
         if (sources.has('Claude')) {
           Logger.info("\nFor Claude Code:");
           Logger.info("  /plugin add agentbrew agentbrew");
         }
-        
+
         if (sources.has('Cursor')) {
           Logger.info("\nFor Cursor:");
-          Logger.info("  Add a new MCP server in Cursor settings with:");
-          Logger.info("  Name: agentbrew");
-          Logger.info("  Type: command");
-          Logger.info("  Command: agentbrew");
+          Logger.info("  Open Cursor Settings > MCP and add a new server:");
+          Logger.info("  Name: agentbrew  |  Type: command  |  Command: agentbrew");
+        }
+
+        if (sources.has('Windsurf')) {
+          Logger.info("\nFor Windsurf:");
+          Logger.info("  Open Windsurf Settings > MCP Servers and add:");
+          Logger.info("  Name: agentbrew  |  Command: agentbrew");
+        }
+
+        if (sources.has('OpenAI Codex CLI')) {
+          Logger.info("\nFor OpenAI Codex CLI:");
+          Logger.info("  Run: codex mcp add agentbrew agentbrew");
+          Logger.info("  Or manually add to ~/.codex/config.toml under [mcp_servers.agentbrew]");
         }
 
         Logger.info("\nNote: You can always use 'agentbrew list' to see all available tools and skills.");
       }
     }
+  });
+
+program
+  .command('sync')
+  .description('Inject shared instructions (~/.agentbrew/INSTRUCTIONS.md) into all installed agent config files')
+  .action(() => {
+    const instructionsPath = getInstructionsPath();
+    Logger.info('AgentBrew Shared Instructions Sync');
+    Logger.info('====================================');
+    Logger.info('⚠️  agentbrew sync will add an "AgentBrew Shared" section to your agent');
+    Logger.info('   config files (e.g. CLAUDE.md, GEMINI.md, AGENTS.md). The section is clearly marked');
+    Logger.info('   and can be removed at any time with: agentbrew unsync\n');
+
+    const results = syncInstructions();
+
+    if (results.length === 0) {
+      Logger.info(`No INSTRUCTIONS.md found — created an example at:\n  ${instructionsPath}`);
+      Logger.info('\nEdit it, then run agentbrew sync again.');
+      return;
+    }
+
+    Logger.info(`Syncing from: ${instructionsPath}\n`);
+
+    const statusIcon: Record<string, string> = {
+      created: '✅',
+      updated: '✅',
+      unchanged: '⏭️ ',
+      skipped: '⚫',
+      manual: 'ℹ️ ',
+      removed: '🗑️ ',
+      not_found: '⚫',
+      no_section: '⚫',
+    };
+
+    const manualNotes: string[] = [];
+    let synced = 0;
+
+    for (const r of results) {
+      const icon = statusIcon[r.status] ?? '  ';
+      const detail = r.path ? ` (${r.path})` : r.note ? ` (${r.note})` : '';
+      Logger.info(`${icon}  ${r.agent.padEnd(18)} → ${r.status}${detail}`);
+      if (r.status === 'manual' && r.note) manualNotes.push(`  ${r.agent}: ${r.note}`);
+      if (r.status === 'created' || r.status === 'updated') synced++;
+    }
+
+    if (manualNotes.length > 0) {
+      Logger.info('\nManual steps required:');
+      manualNotes.forEach(n => Logger.info(n));
+    }
+
+    Logger.info(`\nDone. ${synced} agent config(s) updated.`);
+  });
+
+program
+  .command('unsync')
+  .description('Remove the AgentBrew shared section from all agent config files')
+  .action(() => {
+    Logger.info('Removing AgentBrew shared section from agent config files...\n');
+    const results = unsyncInstructions();
+
+    for (const r of results) {
+      const icon = r.status === 'removed' ? '🗑️ ' : r.status === 'manual' ? 'ℹ️ ' : '⚫';
+      const detail = r.path ? ` (${r.path})` : r.note ? ` (${r.note})` : '';
+      Logger.info(`${icon}  ${r.agent.padEnd(18)} → ${r.status}${detail}`);
+    }
+
+    Logger.info('\nDone. Run agentbrew sync to re-inject.');
   });
 
 export function runCLI() {

@@ -28,8 +28,9 @@ Router (src/router.ts)          ← MCP server exposed to agents
 ## 🚀 Key Features
 - **Lazy Loading:** Servers only start when a tool is actually called.
 - **Auto-Discovery:** Automatically detects MCP servers in Node.js, Python, and Markdown projects.
-- **Universal Migration:** Import your existing configurations from Gemini, Claude Code, and Cursor.
-- **Instruction Index:** Automatically exposes `GEMINI.md` and `CLAUDE.md` files as resources for your agents.
+- **Universal Migration:** Import your existing configurations from Gemini, Claude Code, Cursor, and Windsurf.
+- **Instruction Index:** Automatically exposes per-agent instruction files (`CLAUDE.md`, `GEMINI.md`, `AGENTS.md`, `.cursorrules`, etc.) shipped inside packages as MCP resources.
+- **Shared Instructions:** Write agent instructions once in `~/.agentbrew/INSTRUCTIONS.md` and sync them to every agent's global config with a single command.
 
 ## 🛠 Installation
 
@@ -88,6 +89,37 @@ args = ["index.js"]
 API_TOKEN = "your-secret-token-here"
 ```
 
+
+### 📝 Shared Instructions
+
+AgentBrew can push a single shared instruction file into every agent's global config so all your agents follow the same rules without you maintaining them separately.
+
+**The file:** `~/.agentbrew/INSTRUCTIONS.md`
+
+**Workflow:**
+
+```bash
+# 1. First run creates an example file and exits — nothing is written to agents yet
+agentbrew sync
+
+# 2. Edit the file with your shared rules
+#    (e.g. "always use Context7 before calling external APIs")
+open ~/.agentbrew/INSTRUCTIONS.md
+
+# 3. Push the instructions to all detected agent configs
+agentbrew sync
+```
+
+After syncing, a clearly-marked `AgentBrew Shared` section is injected into each agent's global config file (`~/.claude/CLAUDE.md`, `~/.gemini/GEMINI.md`, `~/.codex/AGENTS.md`, etc.). The section is managed by AgentBrew and will never touch content outside its markers.
+
+To remove the injected section from all configs:
+
+```bash
+agentbrew unsync
+```
+
+> [!NOTE]
+> `agentbrew sync` only writes to config files whose parent directory already exists (i.e. the agent is installed). It skips agents that aren't detected on your machine.
 
 ### Managing the Hub
 ```bash
