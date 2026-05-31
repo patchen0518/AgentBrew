@@ -143,6 +143,7 @@ describe('updater', () => {
     expect(mockGit.pull).toHaveBeenCalledWith(['--ff-only']);
     expect(installer.resolveDependencies).toHaveBeenCalled();
     expect(registry.generateMcpManifest).toHaveBeenCalled();
+    expect(registry.warnIfDiscoveryFailed).toHaveBeenCalled();
   });
 
   it('updateAllPackages should iterate through directories', async () => {

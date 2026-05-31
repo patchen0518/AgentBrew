@@ -82,6 +82,65 @@ args = ["index.js"]
     expect(pkg2?.manifest.prompts?.[0].description).toBe('Skill 1');
   });
 
+  test('does not auto-detect a server for monorepo workspace roots', () => {
+    const rootPath = path.join(PACKAGES_DIR, 'monorepo-pkg');
+    const subPkgPath = path.join(rootPath, 'packages', 'mcp');
+
+    (fs.existsSync as jest.Mock).mockImplementation((p: string) => {
+        if (p === PACKAGES_DIR) return true;
+        if (p === rootPath) return true;
+        if (p === path.join(rootPath, 'packages')) return true;
+        if (p === subPkgPath) return true;
+        if (p === path.join(rootPath, 'package.json')) return true;
+        if (p === path.join(subPkgPath, 'package.json')) return true;
+        if (p === path.join(subPkgPath, 'dist', 'index.js')) return true;
+        return false;
+    });
+
+    (fs.readdirSync as jest.Mock).mockImplementation((p: string) => {
+        if (p === PACKAGES_DIR) return ['monorepo-pkg'];
+        if (p === rootPath) return ['package.json', 'packages'];
+        if (p === path.join(rootPath, 'packages')) return ['mcp'];
+        if (p === subPkgPath) return ['package.json', 'dist'];
+        return [];
+    });
+
+    (fs.statSync as jest.Mock).mockImplementation((p: string) => ({
+        isDirectory: () => [PACKAGES_DIR, rootPath, path.join(rootPath, 'packages'), subPkgPath].includes(p)
+    }));
+
+    (fs.readFileSync as jest.Mock).mockImplementation((p: string) => {
+        if (p === path.join(rootPath, 'package.json')) {
+            return JSON.stringify({
+                name: 'monorepo-root',
+                version: '1.0.0',
+                workspaces: ['packages/*'],
+                bin: { 'my-mcp-server': 'dist/index.js' }
+            });
+        }
+        if (p === path.join(subPkgPath, 'package.json')) {
+            return JSON.stringify({
+                name: 'my-mcp-server',
+                version: '1.0.0',
+                dependencies: { '@modelcontextprotocol/sdk': '^1.0.0' }
+            });
+        }
+        return '';
+    });
+
+    const packages = discoverPackages(true);
+
+    // The workspace root should NOT register a server even though it has a bin entry
+    const rootPkg = packages.find(p => p.subPath === '');
+    expect(rootPkg?.manifest.servers ?? []).toHaveLength(0);
+
+    // The sub-package should register the MCP server
+    const subPkg = packages.find(p => p.path === subPkgPath);
+    expect(subPkg).toBeDefined();
+    expect(subPkg?.manifest.servers).toBeDefined();
+    expect(subPkg?.manifest.servers?.length).toBeGreaterThan(0);
+  });
+
   test('auto-detects poetry projects with poetry run python', () => {
     const pkgPath = path.join(PACKAGES_DIR, 'poetry-pkg');
     

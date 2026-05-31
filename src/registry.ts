@@ -64,7 +64,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, errorMessage: str
 /**
  * Discovers capabilities by briefly running the server and saves them to mcp-manifest.json.
  */
-export async function generateMcpManifest(pkgPath: string, manifest: PackageManifest, throwOnError = false): Promise<McpManifestCache> {
+export async function generateMcpManifest(pkgPath: string, manifest: PackageManifest): Promise<McpManifestCache> {
     const cache: McpManifestCache = { ...manifest, discovered: { tools: {}, prompts: {}, resources: {}, resourceTemplates: {} } };
     
     // Add auto-detected prompts to discovered
@@ -153,9 +153,6 @@ export async function generateMcpManifest(pkgPath: string, manifest: PackageMani
                 try {
                     await transport.close();
                 } catch (closeErr) {}
-                if (throwOnError) {
-                    throw e;
-                }
             }
         }
     }
@@ -360,11 +357,16 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
         manifest.version = pkgJson.version || '0.0.0-auto';
         manifest.description = pkgJson.description || "";
         
-        const hasMcpSdk = pkgJson.dependencies?.['@modelcontextprotocol/sdk'] || 
+        const hasMcpSdk = pkgJson.dependencies?.['@modelcontextprotocol/sdk'] ||
                          pkgJson.devDependencies?.['@modelcontextprotocol/sdk'];
 
+        // Monorepo workspace roots are not servers — the actual server lives in a
+        // sub-package found via findManifests recursion. Skip server auto-detection
+        // but still detect instructions and skills below.
+        const isWorkspaceRoot = Boolean(pkgJson.workspaces);
+
         // Improved auto-detection for bin entries
-        if (pkgJson.bin) {
+        if (!isWorkspaceRoot && pkgJson.bin) {
             const binName = typeof pkgJson.bin === 'string' ? manifest.name : Object.keys(pkgJson.bin)[0];
             const binPath = typeof pkgJson.bin === 'string' ? pkgJson.bin : pkgJson.bin[binName];
             manifest.servers = [{
@@ -373,7 +375,7 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
                 args: [binPath],
                 description: `Node.js server from ${binName}`
             }];
-        } else if (hasMcpSdk) {
+        } else if (!isWorkspaceRoot && hasMcpSdk) {
             // If it has MCP SDK but no bin, try common patterns
             const commonNodeEntryPoints = ['dist/index.js', 'dist/server.js', 'index.js', 'server.js'];
             const entryPoint = commonNodeEntryPoints.find(f => fs.existsSync(path.join(pkgPath, f)));

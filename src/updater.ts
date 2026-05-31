@@ -4,7 +4,7 @@ import simpleGit from 'simple-git';
 import { getPackagesDir } from './config';
 import { Logger } from './logger';
 import { resolveDependencies } from './installer';
-import { findManifests, generateMcpManifest } from './registry';
+import { findManifests, generateMcpManifest, warnIfDiscoveryFailed } from './registry';
 
 export async function updatePackage(packageName: string): Promise<boolean> {
   const packagesDir = getPackagesDir();
@@ -65,7 +65,8 @@ export async function updatePackage(packageName: string): Promise<boolean> {
   await resolveDependencies(pkgPath);
   const manifests = findManifests(pkgPath, 2);
   for (const m of manifests) {
-    await generateMcpManifest(m.path, m.manifest);
+    const cache = await generateMcpManifest(m.path, m.manifest);
+    warnIfDiscoveryFailed(m.manifest, cache);
   }
 
   Logger.info(`Successfully updated '${packageName}'.`);

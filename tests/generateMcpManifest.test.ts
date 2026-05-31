@@ -1,4 +1,4 @@
-import { generateMcpManifest } from '../src/registry';
+import { generateMcpManifest, warnIfDiscoveryFailed } from '../src/registry';
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { Logger } from '../src/logger';
@@ -72,6 +72,47 @@ describe('generateMcpManifest Timeout', () => {
 
     // Verify it still writes manifest to cache
     expect(fs.writeFileSync).toHaveBeenCalled();
+  });
+
+  test('warnIfDiscoveryFailed logs warning for servers absent from cache', () => {
+    const warnSpy = jest.spyOn(Logger, 'warn').mockImplementation(() => {});
+    const manifest = {
+      name: 'pkg', version: '1.0.0',
+      servers: [{ name: 'server-a', command: 'node', args: [] }]
+    };
+    // server-a key absent → discovery failed
+    const cache = { ...manifest, discovered: { tools: {}, prompts: {}, resources: {}, resourceTemplates: {} } };
+
+    warnIfDiscoveryFailed(manifest, cache);
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("'server-a'"));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('agentbrew refresh'));
+    warnSpy.mockRestore();
+  });
+
+  test('warnIfDiscoveryFailed does not warn when all servers are discovered', () => {
+    const warnSpy = jest.spyOn(Logger, 'warn').mockImplementation(() => {});
+    const manifest = {
+      name: 'pkg', version: '1.0.0',
+      servers: [{ name: 'server-a', command: 'node', args: [] }]
+    };
+    const cache = { ...manifest, discovered: { tools: { 'server-a': [] }, prompts: {}, resources: {}, resourceTemplates: {} } };
+
+    warnIfDiscoveryFailed(manifest, cache);
+
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  test('warnIfDiscoveryFailed does nothing when manifest has no servers', () => {
+    const warnSpy = jest.spyOn(Logger, 'warn').mockImplementation(() => {});
+    const manifest = { name: 'skill-only-pkg', version: '1.0.0' };
+    const cache = { ...manifest, discovered: { tools: {}, prompts: {}, resources: {}, resourceTemplates: {} } };
+
+    warnIfDiscoveryFailed(manifest, cache);
+
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 
   test('generateMcpManifest discovers and caches resource templates successfully', async () => {
