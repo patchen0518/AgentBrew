@@ -1,4 +1,4 @@
-import { CapabilityDispatch } from '../src/dispatcher';
+import { CapabilityDispatch, LocalSkillTool } from '../src/dispatcher';
 import fs from 'fs';
 import path from 'path';
 
@@ -96,6 +96,29 @@ describe('CapabilityDispatch Unit Tests', () => {
       expect(tools[0].name).toBe('pkg1__tool1');
     });
 
+    test('listAllTools includes registered skill tools', () => {
+      dispatcher.addSkillTool('mypkg__my-skill', {
+        skillDir: '/tmp/pkg/skills/my-skill',
+        skillName: 'my-skill',
+        description: 'Does something useful',
+      });
+      const tools = dispatcher.listAllTools(new Map());
+      expect(tools).toHaveLength(1);
+      expect(tools[0].name).toBe('mypkg__my-skill');
+      expect(tools[0].description).toContain('Does something useful');
+    });
+
+    test('listAllTools shows skill tools before child-server tools', () => {
+      dispatcher.addSkillTool('mypkg__my-skill', {
+        skillDir: '/tmp/skill',
+        skillName: 'my-skill',
+      });
+      const cached = new Map([['pkg1', [{ name: 'tool1', description: 'd1' }]]]);
+      const tools = dispatcher.listAllTools(cached as any);
+      expect(tools[0].name).toBe('mypkg__my-skill');
+      expect(tools[1].name).toBe('pkg1__tool1');
+    });
+
     test('listAllPrompts aggregates local and remote prompts', () => {
       const cached = new Map([['pkg1', [{ name: 'prompt1' }]]]);
       const prompts = dispatcher.listAllPrompts(cached as any);
@@ -153,6 +176,52 @@ describe('CapabilityDispatch Unit Tests', () => {
 
     test('getClient throws on unknown prefix', async () => {
       await expect(dispatcher.getClient('unknown-prefix')).rejects.toThrow('No client found');
+    });
+  });
+
+  describe('Skill Tools', () => {
+    test('callSkillTool returns null for unknown tool names', () => {
+      expect(dispatcher.callSkillTool('nonexistent__skill')).toBeNull();
+    });
+
+    test('callSkillTool reads SKILL.md and returns its content', () => {
+      dispatcher.addSkillTool('mypkg__my-skill', {
+        skillDir: '/tmp/pkg/skills/my-skill',
+        skillName: 'my-skill',
+        description: 'A skill',
+      });
+      (fs.readFileSync as jest.Mock).mockReturnValue('# My Skill\nDo the thing.');
+
+      const result = dispatcher.callSkillTool('mypkg__my-skill');
+      expect(result).not.toBeNull();
+      expect(result!.content[0].type).toBe('text');
+      expect(result!.content[0].text).toBe('# My Skill\nDo the thing.');
+      expect(fs.readFileSync).toHaveBeenCalledWith(
+        path.join('/tmp/pkg/skills/my-skill', 'SKILL.md'),
+        'utf-8'
+      );
+    });
+
+    test('callSkillTool returns error text when SKILL.md cannot be read', () => {
+      dispatcher.addSkillTool('mypkg__bad-skill', {
+        skillDir: '/tmp/no-such-dir',
+        skillName: 'bad-skill',
+      });
+      (fs.readFileSync as jest.Mock).mockImplementation(() => { throw new Error('ENOENT'); });
+
+      const result = dispatcher.callSkillTool('mypkg__bad-skill');
+      expect(result).not.toBeNull();
+      expect(result!.content[0].text).toContain('Error reading skill');
+    });
+
+    test('skill tool inputSchema is an empty object schema', () => {
+      dispatcher.addSkillTool('mypkg__my-skill', {
+        skillDir: '/tmp/skill',
+        skillName: 'my-skill',
+        description: 'desc',
+      });
+      const tools = dispatcher.listAllTools(new Map());
+      expect(tools[0].inputSchema).toEqual({ type: 'object', properties: {} });
     });
   });
 });

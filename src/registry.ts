@@ -214,6 +214,36 @@ export function findManifests(currentPath: string, depth: number): { path: strin
         try {
             manifest = JSON.parse(fs.readFileSync(cachePath, 'utf-8')) as McpManifestCache;
             foundCache = true;
+            // Refresh SKILL.md descriptions from disk — cached values may be stale (e.g. "---")
+            if (manifest.prompts) {
+                for (const prompt of manifest.prompts) {
+                    if (path.basename(prompt.file).toUpperCase() !== 'SKILL.MD') continue;
+                    try {
+                        const skillPath = path.resolve(currentPath, prompt.file);
+                        const lines = fs.readFileSync(skillPath, 'utf-8').split('\n');
+                        if (lines[0]?.trim() === '---') {
+                            const fmEnd = lines.indexOf('---', 1);
+                            if (fmEnd > 0) {
+                                const fmLines = lines.slice(1, fmEnd);
+                                const descIdx = fmLines.findIndex((l: string) => /^description\s*:/.test(l));
+                                if (descIdx >= 0) {
+                                    const inline = fmLines[descIdx].replace(/^description\s*:\s*/, '').trim();
+                                    if (inline === '>-' || inline === '>' || inline === '|' || inline === '|-') {
+                                        const blockLines: string[] = [];
+                                        for (let i = descIdx + 1; i < fmLines.length; i++) {
+                                            if (/^\s/.test(fmLines[i])) blockLines.push(fmLines[i].trim());
+                                            else break;
+                                        }
+                                        prompt.description = blockLines.join(' ');
+                                    } else {
+                                        prompt.description = inline.replace(/^"|"$/g, '').trim();
+                                    }
+                                }
+                            }
+                        }
+                    } catch {}
+                }
+            }
         } catch (e) {
             Logger.error(`Failed to parse cache ${cachePath}:`, e);
         }
@@ -442,9 +472,32 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
                       let description = `Markdown skill: ${relativePath}`;
                       try {
                           const firstLines = fs.readFileSync(fullPath, 'utf-8').split('\n');
-                          const firstNonEmpty = firstLines.find(l => l.trim().length > 0);
-                          if (firstNonEmpty) {
-                              description = firstNonEmpty.replace(/^#+\s*/, '').trim();
+                          if (firstLines[0]?.trim() === '---') {
+                              // YAML frontmatter — extract description: field
+                              const fmEnd = firstLines.indexOf('---', 1);
+                              if (fmEnd > 0) {
+                                  const fmLines = firstLines.slice(1, fmEnd);
+                                  const descIdx = fmLines.findIndex(l => /^description\s*:/.test(l));
+                                  if (descIdx >= 0) {
+                                      const inline = fmLines[descIdx].replace(/^description\s*:\s*/, '').trim();
+                                      if (inline === '>-' || inline === '>' || inline === '|' || inline === '|-') {
+                                          const blockLines: string[] = [];
+                                          for (let i = descIdx + 1; i < fmLines.length; i++) {
+                                              if (/^\s/.test(fmLines[i])) blockLines.push(fmLines[i].trim());
+                                              else break;
+                                          }
+                                          description = blockLines.join(' ');
+                                      } else {
+                                          description = inline.replace(/^"|"$/g, '').trim();
+                                      }
+                                  } else {
+                                      const heading = firstLines.slice(fmEnd + 1).find(l => /^#+\s/.test(l));
+                                      if (heading) description = heading.replace(/^#+\s*/, '').trim();
+                                  }
+                              }
+                          } else {
+                              const firstNonEmpty = firstLines.find(l => l.trim().length > 0);
+                              if (firstNonEmpty) description = firstNonEmpty.replace(/^#+\s*/, '').trim();
                           }
                       } catch (e) {}
 

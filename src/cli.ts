@@ -7,7 +7,25 @@ import { startRouter, ManagedClient } from './router';
 import { enablePackage, disablePackage, isPackageEnabled } from './state';
 import { discoverPackages, PackageInfo, McpManifestCache, findManifests, generateMcpManifest } from './registry';
 import { runMigration, discoverExternalConfigs } from './migration';
-import { syncInstructions, unsyncInstructions, getInstructionsPath } from './sync';
+import {
+  syncInstructions,
+  unsyncInstructions,
+  getInstructionsPath,
+  extractSkillEntries,
+  syncSkillsToClaudeCode,
+  unsyncSkillsFromClaudeCode,
+  syncSkillsToGeminiCLI,
+  unsyncSkillsFromGeminiCLI,
+  syncSkillsToWindsurf,
+  unsyncSkillsFromWindsurf,
+  syncSkillsToAntigravityCLI,
+  unsyncSkillsFromAntigravityCLI,
+  syncSkillsToCursor,
+  unsyncSkillsFromCursor,
+  syncMcpServerToCursor,
+  unsyncMcpServerFromCursor,
+  cleanOrphanSkills,
+} from './sync';
 import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
@@ -92,6 +110,22 @@ program
         return answer.toLowerCase() === 'y';
       });
       Logger.info(`Successfully installed package from ${url}`);
+
+      // Sync newly installed skills to all agents
+      const packages = discoverPackages();
+      const skills = extractSkillEntries(packages);
+      const allSkillResults = [
+        ...syncSkillsToClaudeCode(skills),
+        ...syncSkillsToGeminiCLI(skills),
+        ...syncSkillsToWindsurf(skills),
+        ...syncSkillsToAntigravityCLI(skills),
+        ...syncSkillsToCursor(skills),
+      ];
+      const linked = allSkillResults.filter(r => r.status === 'linked');
+      if (linked.length > 0) {
+        Logger.info(`Registered ${linked.length} skill(s) with agents:`);
+        linked.forEach(r => Logger.info(`  + ${r.entryName}`));
+      }
     } catch (error: any) {
       Logger.error(`Failed to install package: ${error.message}`);
       process.exit(1);
@@ -231,6 +265,12 @@ program
       try {
         Logger.info(`Uninstalling ${name} from ${target.path}...`);
         fs.rmSync(target.path, { recursive: true, force: true });
+        const orphans = cleanOrphanSkills();
+        if (orphans.length > 0) {
+          Logger.info(`Removed ${orphans.length} stale skill link(s).`);
+        }
+        // Regenerate Cursor index with remaining skills (cleanOrphanSkills can't regenerate it)
+        syncSkillsToCursor(extractSkillEntries(discoverPackages()));
         Logger.info(`Successfully uninstalled package '${name}'`);
       } catch (error: any) {
         Logger.error(`Failed to uninstall: ${error.message}`);
@@ -358,9 +398,15 @@ program
         }
 
         if (sources.has('Cursor')) {
-          Logger.info("\nFor Cursor:");
-          Logger.info("  Open Cursor Settings > MCP and add a new server:");
-          Logger.info("  Name: agentbrew  |  Type: command  |  Command: agentbrew");
+          const cursorMcpResults = syncMcpServerToCursor();
+          const registered = cursorMcpResults.find(r => r.status === 'linked' || r.status === 'already_exists');
+          if (registered) {
+            Logger.info(`\n✅  Cursor: agentbrew registered in ${registered.path}`);
+          } else {
+            Logger.info("\nFor Cursor:");
+            Logger.info("  Open Cursor Settings > MCP and add a new server:");
+            Logger.info("  Name: agentbrew  |  Type: command  |  Command: agentbrew");
+          }
         }
 
         if (sources.has('Windsurf')) {
@@ -382,11 +428,11 @@ program
 
 program
   .command('sync')
-  .description('Inject shared instructions (~/.agentbrew/INSTRUCTIONS.md) into all installed agent config files')
+  .description('Inject shared instructions into agent configs and register skills with Claude Code')
   .action(() => {
     const instructionsPath = getInstructionsPath();
-    Logger.info('AgentBrew Shared Instructions Sync');
-    Logger.info('====================================');
+    Logger.info('AgentBrew Sync');
+    Logger.info('==============');
     Logger.info('⚠️  agentbrew sync will add an "AgentBrew Shared" section to your agent');
     Logger.info('   config files (e.g. CLAUDE.md, GEMINI.md, AGENTS.md). The section is clearly marked');
     Logger.info('   and can be removed at any time with: agentbrew unsync\n');
@@ -399,7 +445,7 @@ program
       return;
     }
 
-    Logger.info(`Syncing from: ${instructionsPath}\n`);
+    Logger.info(`Syncing instructions from: ${instructionsPath}\n`);
 
     const statusIcon: Record<string, string> = {
       created: '✅',
@@ -428,12 +474,67 @@ program
       manualNotes.forEach(n => Logger.info(n));
     }
 
+    // Sync skills to each agent
+    Logger.info('\nSyncing skills...');
+    const packages = discoverPackages();
+    const skills = extractSkillEntries(packages);
+
+    const skillStatusIcon: Record<string, string> = {
+      linked: '✅',
+      already_exists: '⏭️ ',
+      skipped: '⚫',
+      error: '❌',
+      removed: '🗑️ ',
+    };
+
+    function printSkillResults(label: string, results: ReturnType<typeof syncSkillsToClaudeCode>) {
+      if (results.length === 0) {
+        Logger.info(`  ${label}: not installed, skipped`);
+        return;
+      }
+      for (const r of results) {
+        const icon = skillStatusIcon[r.status] ?? '  ';
+        const detail = r.note ? ` (${r.note})` : '';
+        Logger.info(`${icon}  [${label}] ${r.entryName}${detail}`);
+      }
+    }
+
+    const claudeSkills = syncSkillsToClaudeCode(skills);
+    const geminiSkills = syncSkillsToGeminiCLI(skills);
+    const windsurfSkills = syncSkillsToWindsurf(skills);
+    const antigravitySkills = syncSkillsToAntigravityCLI(skills);
+
+    // Register agentbrew as an MCP server in Cursor — this exposes all skills as MCP tools.
+    // Only fall back to the markdown index if MCP registration failed or Cursor isn't installed.
+    const cursorMcpResults = syncMcpServerToCursor();
+    const cursorMcpOk = cursorMcpResults.some(r => r.status === 'linked' || r.status === 'already_exists');
+    const cursorSkills = cursorMcpOk
+      ? unsyncSkillsFromCursor()   // remove stale index — MCP tools supersede it
+      : syncSkillsToCursor(skills); // fallback: markdown index for non-MCP discovery
+
+    if (skills.length === 0) {
+      Logger.info('  No skills found in installed packages.');
+    } else {
+      printSkillResults('Claude Code', claudeSkills);
+      printSkillResults('Gemini CLI', geminiSkills);
+      printSkillResults('Windsurf', windsurfSkills);
+      printSkillResults('Antigravity CLI', antigravitySkills);
+      printSkillResults('Cursor MCP', cursorMcpResults);
+      if (!cursorMcpOk) printSkillResults('Cursor (fallback index)', cursorSkills);
+
+      const totalLinked = [...claudeSkills, ...geminiSkills, ...windsurfSkills, ...antigravitySkills, ...cursorMcpResults]
+        .filter(r => r.status === 'linked').length;
+      if (totalLinked > 0) {
+        Logger.info(`\n  Restart your agents to pick up ${totalLinked} new skill(s).`);
+      }
+    }
+
     Logger.info(`\nDone. ${synced} agent config(s) updated.`);
   });
 
 program
   .command('unsync')
-  .description('Remove the AgentBrew shared section from all agent config files')
+  .description('Remove the AgentBrew shared section from all agent config files and unlink skills')
   .action(() => {
     Logger.info('Removing AgentBrew shared section from agent config files...\n');
     const results = unsyncInstructions();
@@ -442,6 +543,25 @@ program
       const icon = r.status === 'removed' ? '🗑️ ' : r.status === 'manual' ? 'ℹ️ ' : '⚫';
       const detail = r.path ? ` (${r.path})` : r.note ? ` (${r.note})` : '';
       Logger.info(`${icon}  ${r.agent.padEnd(18)} → ${r.status}${detail}`);
+    }
+
+    Logger.info('\nRemoving skill links from agents...');
+    const allUnsyncResults = [
+      ...unsyncSkillsFromClaudeCode(),
+      ...unsyncSkillsFromGeminiCLI(),
+      ...unsyncSkillsFromWindsurf(),
+      ...unsyncSkillsFromAntigravityCLI(),
+      ...unsyncSkillsFromCursor(),
+      ...unsyncMcpServerFromCursor(),
+    ];
+    if (allUnsyncResults.length === 0) {
+      Logger.info('  No skill links to remove.');
+    } else {
+      for (const r of allUnsyncResults) {
+        const icon = r.status === 'removed' ? '🗑️ ' : '⚫';
+        const detail = r.note ? ` (${r.note})` : r.path ? ` (${r.path})` : '';
+        Logger.info(`${icon}  ${r.entryName}${detail}`);
+      }
     }
 
     Logger.info('\nDone. Run agentbrew sync to re-inject.');

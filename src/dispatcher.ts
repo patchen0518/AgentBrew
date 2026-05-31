@@ -16,9 +16,17 @@ export interface LocalResource {
   file: string;
 }
 
+export interface LocalSkillTool {
+  /** Absolute path to the directory containing SKILL.md */
+  skillDir: string;
+  skillName: string;
+  description?: string;
+}
+
 export class CapabilityDispatch {
   private resourceToClient: Map<string, { prefix: string, originalUri: string }> = new Map();
   private localResources: Map<string, LocalResource> = new Map();
+  private localSkillTools: Map<string, LocalSkillTool> = new Map();
 
   constructor(
     private managedClients: Map<string, ManagedClient>,
@@ -93,8 +101,41 @@ export class CapabilityDispatch {
     return await managed.getClient();
   }
 
+  addSkillTool(fullName: string, skill: LocalSkillTool) {
+    this.localSkillTools.set(fullName, skill);
+  }
+
+  /**
+   * If fullName is a registered skill tool, reads and returns its SKILL.md content.
+   * Returns null if the name is not a skill tool (caller should dispatch normally).
+   */
+  callSkillTool(fullName: string): { content: Array<{ type: string; text: string }> } | null {
+    const skill = this.localSkillTools.get(fullName);
+    if (!skill) return null;
+
+    const skillMdPath = path.join(skill.skillDir, 'SKILL.md');
+    try {
+      const text = fs.readFileSync(skillMdPath, 'utf-8');
+      return { content: [{ type: 'text', text }] };
+    } catch (e: any) {
+      return { content: [{ type: 'text', text: `Error reading skill: ${e.message}` }] };
+    }
+  }
+
   listAllTools(cachedTools: Map<string, Tool[]>): Tool[] {
     const allTools: Tool[] = [];
+
+    // Skill tools are served locally — no child process needed
+    for (const [name, skill] of this.localSkillTools.entries()) {
+      allTools.push({
+        name,
+        description: skill.description
+          ? `${skill.description} (AgentBrew skill — returns instructions)`
+          : `AgentBrew skill: ${skill.skillName}. Returns the SKILL.md instructions.`,
+        inputSchema: { type: 'object', properties: {} },
+      });
+    }
+
     for (const [prefix, tools] of cachedTools.entries()) {
       allTools.push(...tools.map(tool => ({
         ...tool,
@@ -115,10 +156,11 @@ export class CapabilityDispatch {
       });
     }
 
-    // Add local prompts
-    for (const [prefix, local] of this.localPrompts.entries()) {
+    // Add local prompts (skip skills already exposed as tools)
+    for (const [fullName, local] of this.localPrompts.entries()) {
+      if (this.localSkillTools.has(fullName)) continue;
       allPrompts.push({
-        name: prefix,
+        name: fullName,
         description: local.description
       });
     }

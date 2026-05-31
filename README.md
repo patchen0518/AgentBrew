@@ -28,9 +28,10 @@ Router (src/router.ts)          ← MCP server exposed to agents
 ## 🚀 Key Features
 - **Lazy Loading:** Servers only start when a tool is actually called.
 - **Auto-Discovery:** Automatically detects MCP servers in Node.js, Python, and Markdown projects.
-- **Universal Migration:** Import your existing configurations from Gemini, Claude Code, Cursor, and Windsurf.
+- **Universal Migration:** Import your existing configurations from Gemini, Claude Code, Cursor, Codex, and Windsurf.
 - **Instruction Index:** Automatically exposes per-agent instruction files (`CLAUDE.md`, `GEMINI.md`, `AGENTS.md`, `.cursorrules`, etc.) shipped inside packages as MCP resources.
 - **Shared Instructions:** Write agent instructions once in `~/.agentbrew/INSTRUCTIONS.md` and sync them to every agent's global config with a single command.
+- **Skill Sync:** Registers `SKILL.md`-based slash commands from installed packages directly into Claude Code, Gemini CLI, Windsurf, and Antigravity. For Cursor, automatically wires agentbrew as an MCP server so all skills are available as native tools.
 
 ## 🛠 Installation
 
@@ -90,31 +91,36 @@ API_TOKEN = "your-secret-token-here"
 ```
 
 
-### 📝 Shared Instructions
+### 📝 Shared Instructions & Skill Sync
 
-AgentBrew can push a single shared instruction file into every agent's global config so all your agents follow the same rules without you maintaining them separately.
+`agentbrew sync` does two things in a single command:
 
-**The file:** `~/.agentbrew/INSTRUCTIONS.md`
+1. **Injects shared instructions** from `~/.agentbrew/INSTRUCTIONS.md` into every agent's global config file.
+2. **Registers skills** from installed packages as native slash commands (or MCP tools for Cursor).
 
 **Workflow:**
 
 ```bash
-# 1. First run creates an example file and exits — nothing is written to agents yet
+# 1. First run creates an example INSTRUCTIONS.md and exits — nothing is written yet
 agentbrew sync
 
 # 2. Edit the file with your shared rules
 #    (e.g. "always use Context7 before calling external APIs")
 open ~/.agentbrew/INSTRUCTIONS.md
 
-# 3. Push the instructions to all detected agent configs
+# 3. Push instructions and skills to all detected agents
 agentbrew sync
 ```
 
-After syncing, a clearly-marked `AgentBrew Shared` section is injected into each agent's global config file (`~/.claude/CLAUDE.md`, `~/.gemini/GEMINI.md`, `~/.codex/AGENTS.md`, etc.). The section is managed by AgentBrew and will never touch content outside its markers.
+After syncing:
+- A clearly-marked `AgentBrew Shared` section is injected into each agent's global config (`~/.claude/CLAUDE.md`, `~/.gemini/GEMINI.md`, `~/.codex/AGENTS.md`, etc.).
+- `SKILL.md`-based skills from installed packages are registered as slash commands in **Claude Code** (`~/.claude/skills/`), **Gemini CLI**, **Windsurf**, and **Antigravity**.
+- For **Cursor**, agentbrew is automatically registered as an MCP server in `~/.cursor/mcp.json` so all skills and tools appear natively — no manual configuration needed.
 
-To remove the injected section from all configs:
+The injected instruction section is managed by AgentBrew and will never touch content outside its markers. Skill entries are tracked in `~/.agentbrew/synced-skills.json` so `agentbrew unsync` can clean them up precisely.
 
 ```bash
+# Remove all injected instructions and skill registrations
 agentbrew unsync
 ```
 
@@ -155,7 +161,9 @@ Point your AI agent to launch `agentbrew` as its MCP server.
 
 - **Gemini CLI:** `gemini mcp add agentbrew agentbrew`
 - **Claude Code:** `/plugin add agentbrew agentbrew`
-- **Cursor:** Add a new "command" type MCP server in settings with command `agentbrew`.
+- **Codex:** `codex mcp add agentbrew agentbrew`
+- **Cursor:** Run `agentbrew sync` — agentbrew is automatically registered in `~/.cursor/mcp.json`. No manual steps required.
+- **Windsurf / Antigravity:** Run `agentbrew sync` to register skills as slash commands.
 
 ### Manual JSON Configuration
 For agents that use a configuration file (like **Claude Desktop** or other MCP clients), add AgentBrew to your config JSON:

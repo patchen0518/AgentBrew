@@ -195,8 +195,12 @@ export class Router {
 
     this.mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
       const fullName = request.params.name;
+
+      // Skill tools are served locally — check before dispatching to child clients
+      const skillResult = this.dispatcher.callSkillTool(fullName);
+      if (skillResult !== null) return skillResult;
+
       const { prefix, name } = this.dispatcher.parseName(fullName);
-      
       const client = await this.dispatcher.getClient(prefix);
       return await client.callTool({
           name: name,
@@ -291,13 +295,22 @@ export class Router {
     if (pkg.manifest.prompts) {
       for (const prompt of pkg.manifest.prompts) {
         if (!isPackageEnabled(pkg.packageName, prompt.name)) continue;
-        const prefix = this.dispatcher.scopeName(pkgId, prompt.name);
-        this.localPrompts.set(prefix, {
+        const fullName = this.dispatcher.scopeName(pkgId, prompt.name);
+        this.localPrompts.set(fullName, {
           pkgPath: pkg.path,
           file: prompt.file,
           name: prompt.name,
           description: prompt.description
         });
+
+        // SKILL.md prompts are also exposed as MCP tools for universal agent discovery
+        if (path.basename(prompt.file).toUpperCase() === 'SKILL.MD') {
+          this.dispatcher.addSkillTool(fullName, {
+            skillDir: path.dirname(path.resolve(pkg.path, prompt.file)),
+            skillName: prompt.name,
+            description: prompt.description,
+          });
+        }
       }
     }
   }
