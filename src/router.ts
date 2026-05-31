@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { discoverPackages, PackageInfo, McpManifestCache } from './registry';
 import { CapabilityDispatch, LocalPrompt, LocalResource } from './dispatcher';
-import { isPackageEnabled } from './state';
+import { isPackageEnabled, getSkillsAsMcpTools } from './state';
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -293,6 +293,10 @@ export class Router {
     }
 
     if (pkg.manifest.prompts) {
+      // Read once per package; SKILL.md prompts are exposed as MCP tools unless the user opts out
+      // via skillsAsMcpTools=false in ~/.agentbrew/state.json (e.g. Claude Code users who run sync
+      // already get skills as native slash commands and don't need the MCP tool duplicate).
+      const exposedAsTools = getSkillsAsMcpTools();
       for (const prompt of pkg.manifest.prompts) {
         if (!isPackageEnabled(pkg.packageName, prompt.name)) continue;
         const fullName = this.dispatcher.scopeName(pkgId, prompt.name);
@@ -303,8 +307,7 @@ export class Router {
           description: prompt.description
         });
 
-        // SKILL.md prompts are also exposed as MCP tools for universal agent discovery
-        if (path.basename(prompt.file).toUpperCase() === 'SKILL.MD') {
+        if (path.basename(prompt.file).toUpperCase() === 'SKILL.MD' && exposedAsTools) {
           this.dispatcher.addSkillTool(fullName, {
             skillDir: path.dirname(path.resolve(pkg.path, prompt.file)),
             skillName: prompt.name,

@@ -5,7 +5,7 @@ import { installPackage, resolveDependencies } from './installer';
 import { updatePackage, updateAllPackages } from './updater';
 import { startRouter, ManagedClient } from './router';
 import { enablePackage, disablePackage, isPackageEnabled } from './state';
-import { discoverPackages, PackageInfo, McpManifestCache, findManifests, generateMcpManifest } from './registry';
+import { discoverPackages, PackageInfo, McpManifestCache, findManifests, generateMcpManifest, warnIfDiscoveryFailed } from './registry';
 import { runMigration, discoverExternalConfigs } from './migration';
 import {
   syncInstructions,
@@ -82,7 +82,8 @@ program
       Logger.info(`Refreshing cache for ${pkg.packageName}...`);
       const manifests = findManifests(pkg.path, 2);
       for (const m of manifests) {
-        await generateMcpManifest(m.path, m.manifest);
+        const cache = await generateMcpManifest(m.path, m.manifest);
+        warnIfDiscoveryFailed(m.manifest, cache);
       }
       refreshedPaths.add(pkg.path);
     }
@@ -227,7 +228,7 @@ program
   .argument('[capability]', 'Optional: specific capability name')
   .action((name: string, capability?: string) => {
     const id = capability ? `${name}:${capability}` : name;
-    if (enablePackage(id)) {
+    if (enablePackage(id) === 'changed') {
       Logger.info(`Enabled ${capability ? `capability '${capability}' in ` : ''}package '${name}'`);
     } else {
       Logger.info(`${capability ? `Capability '${capability}' in ` : ''}Package '${name}' is already enabled.`);
@@ -241,7 +242,7 @@ program
   .argument('[capability]', 'Optional: specific capability name')
   .action((name: string, capability?: string) => {
     const id = capability ? `${name}:${capability}` : name;
-    if (disablePackage(id)) {
+    if (disablePackage(id) === 'changed') {
       Logger.info(`Disabled ${capability ? `capability '${capability}' in ` : ''}package '${name}'`);
     } else {
       Logger.info(`${capability ? `Capability '${capability}' in ` : ''}Package '${name}' is already disabled.`);
@@ -342,7 +343,8 @@ program
       // Regenerate cache from the updated manifest
       const manifests = findManifests(target.path, 2);
       for (const m of manifests) {
-        await generateMcpManifest(m.path, m.manifest);
+        const cache = await generateMcpManifest(m.path, m.manifest);
+        warnIfDiscoveryFailed(m.manifest, cache);
       }
 
       Logger.info(`Successfully uninstalled capability '${capability}' from package '${name}'`);

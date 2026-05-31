@@ -4,6 +4,7 @@ import { getBrewRoot, getStateFile } from './config';
 
 export interface AgentBrewState {
   disabledPackages: string[];
+  skillsAsMcpTools?: boolean;
 }
 
 export function loadState(): AgentBrewState {
@@ -28,24 +29,29 @@ export function saveState(state: AgentBrewState) {
   fs.writeFileSync(stateFile, JSON.stringify(state, null, 2), 'utf-8');
 }
 
-export function enablePackage(pkgName: string) {
+export function enablePackage(pkgName: string): 'changed' | 'already_enabled' {
   const state = loadState();
   if (state.disabledPackages.includes(pkgName)) {
     state.disabledPackages = state.disabledPackages.filter(p => p !== pkgName);
     saveState(state);
-    return true;
+    return 'changed';
   }
-  return false; // already enabled
+  return 'already_enabled';
 }
 
-export function disablePackage(pkgName: string) {
+export function disablePackage(pkgName: string): 'changed' | 'already_disabled' {
   const state = loadState();
   if (!state.disabledPackages.includes(pkgName)) {
     state.disabledPackages.push(pkgName);
     saveState(state);
-    return true;
+    return 'changed';
   }
-  return false; // already disabled
+  return 'already_disabled';
+}
+
+export function getSkillsAsMcpTools(): boolean {
+  const state = loadState();
+  return state.skillsAsMcpTools !== false;
 }
 
 export function isPackageEnabled(pkgName: string, capabilityName?: string): boolean {

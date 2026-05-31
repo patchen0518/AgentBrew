@@ -47,24 +47,24 @@ describe('Hierarchical CLI Commands', () => {
 
     describe('Enable/Disable Commands', () => {
         it('should enable/disable package without capability', async () => {
-            (enablePackage as jest.Mock).mockReturnValue(true);
+            (enablePackage as jest.Mock).mockReturnValue('changed');
             await program.parseAsync(['node', 'agentbrew', 'enable', 'my-pkg']);
             expect(enablePackage).toHaveBeenCalledWith('my-pkg');
             expect(Logger.info).toHaveBeenCalledWith("Enabled package 'my-pkg'");
 
-            (disablePackage as jest.Mock).mockReturnValue(true);
+            (disablePackage as jest.Mock).mockReturnValue('changed');
             await program.parseAsync(['node', 'agentbrew', 'disable', 'my-pkg']);
             expect(disablePackage).toHaveBeenCalledWith('my-pkg');
             expect(Logger.info).toHaveBeenCalledWith("Disabled package 'my-pkg'");
         });
 
         it('should enable/disable capability with format package:capability', async () => {
-            (enablePackage as jest.Mock).mockReturnValue(true);
+            (enablePackage as jest.Mock).mockReturnValue('changed');
             await program.parseAsync(['node', 'agentbrew', 'enable', 'my-pkg', 'my-cap']);
             expect(enablePackage).toHaveBeenCalledWith('my-pkg:my-cap');
             expect(Logger.info).toHaveBeenCalledWith("Enabled capability 'my-cap' in package 'my-pkg'");
 
-            (disablePackage as jest.Mock).mockReturnValue(true);
+            (disablePackage as jest.Mock).mockReturnValue('changed');
             await program.parseAsync(['node', 'agentbrew', 'disable', 'my-pkg', 'my-cap']);
             expect(disablePackage).toHaveBeenCalledWith('my-pkg:my-cap');
             expect(Logger.info).toHaveBeenCalledWith("Disabled capability 'my-cap' in package 'my-pkg'");

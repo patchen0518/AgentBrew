@@ -266,7 +266,7 @@ describe('Installer', () => {
     await expect(installPackage(url)).rejects.toThrow(/ssh-add -l/);
   });
 
-  test('fails installation and suggests credentials when generateMcpManifest connection throws error', async () => {
+  test('install succeeds and warns when a server cannot be discovered due to missing credentials', async () => {
     const url = 'https://github.com/user/auth-fail-repo.git';
     const targetPath = getExpectedPath(url);
 
@@ -283,12 +283,29 @@ describe('Installer', () => {
     });
 
     (registry.findManifests as jest.Mock).mockReturnValue([
-        { path: targetPath, manifest: { name: 'auth-fail-repo', version: '1.0.0' } }
+        {
+            path: targetPath,
+            manifest: {
+                name: 'auth-fail-repo',
+                version: '1.0.0',
+                servers: [{ name: 'my-server', command: 'node', args: ['server.js'] }]
+            }
+        }
     ]);
 
-    (registry.generateMcpManifest as jest.Mock).mockRejectedValue(new Error('Connection timeout of 10s exceeded'));
+    // Simulate non-fatal discovery: function resolves but server tools are absent from cache
+    (registry.generateMcpManifest as jest.Mock).mockResolvedValue({
+        name: 'auth-fail-repo',
+        version: '1.0.0',
+        discovered: { tools: {}, prompts: {}, resources: {}, resourceTemplates: {} }
+    });
 
-    await expect(installPackage(url)).rejects.toThrow(/This server may require API tokens or credentials/);
-    expect(fs.promises.rm).toHaveBeenCalledWith(targetPath, expect.objectContaining({ recursive: true }));
+    const result = await installPackage(url);
+    expect(result).toBe(targetPath);
+    expect(fs.promises.rm).not.toHaveBeenCalled();
+    expect(registry.warnIfDiscoveryFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ servers: [expect.objectContaining({ name: 'my-server' })] }),
+      expect.objectContaining({ discovered: expect.objectContaining({ tools: {} }) })
+    );
   });
 });

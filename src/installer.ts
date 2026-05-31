@@ -6,7 +6,7 @@ import { promisify } from 'util';
 import * as toml from 'smol-toml';
 
 import { Logger } from './logger';
-import { PackageManifest, generateMcpManifest, findManifests } from './registry';
+import { PackageManifest, generateMcpManifest, warnIfDiscoveryFailed, findManifests } from './registry';
 import { getPackagesDir } from './config';
 
 const execAsync = promisify(exec);
@@ -188,7 +188,8 @@ export async function installPackage(url: string, confirm?: (summary: { scripts:
                 validateName(prompt.name, 'prompt');
             }
         }
-        await generateMcpManifest(m.path, m.manifest, true);
+        const cache = await generateMcpManifest(m.path, m.manifest);
+        warnIfDiscoveryFailed(m.manifest, cache);
     }
     
     return targetPath;
@@ -349,7 +350,8 @@ export async function createLinkPackage(name: string, command: string, args: str
   await writeFileAsync(path.join(targetPath, 'agentbrew.toml'), toml.stringify(manifest as any), 'utf-8');
 
   // Generate discovery cache
-  await generateMcpManifest(targetPath, manifest);
+  const cache = await generateMcpManifest(targetPath, manifest);
+  warnIfDiscoveryFailed(manifest, cache);
 
   return targetPath;
 }

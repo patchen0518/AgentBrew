@@ -165,6 +165,23 @@ export async function generateMcpManifest(pkgPath: string, manifest: PackageMani
     return cache;
 }
 
+/**
+ * Logs a warning for any declared servers whose tools were absent from the discovery cache,
+ * indicating they likely failed to start (e.g. missing API keys).
+ */
+export function warnIfDiscoveryFailed(manifest: PackageManifest, cache: McpManifestCache): void {
+  if (!manifest.servers) return;
+  const failedServers = manifest.servers.filter(s =>
+    cache.discovered?.tools?.[s.name] === undefined
+  );
+  if (failedServers.length > 0) {
+    Logger.warn(
+      `Server(s) could not be discovered (may require API keys): ${failedServers.map(s => `'${s.name}'`).join(', ')}\n` +
+      `  Set the required environment variables, then run: agentbrew refresh`
+    );
+  }
+}
+
 export function discoverPackages(includeDisabled = false): PackageInfo[] {
   const packagesDir = getPackagesDir();
   if (!fs.existsSync(packagesDir)) return [];
