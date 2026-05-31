@@ -100,6 +100,10 @@ agentbrew install <github-url>
 agentbrew migrate
 ```
 
+> **Installation failed?** If `agentbrew install` fails (missing dependencies, build errors, etc.), ask your AI agent directly:
+> > *"Install `<github-url>` to agentbrew for me."*
+> The agent can run the install command, read any error output, and resolve issues autonomously.
+
 > **API keys:** If a package requires credentials to start its MCP server, discovery may fail silently at install time. AgentBrew will warn you which servers need attention. Set the required environment variables and run `agentbrew refresh` to complete setup.
 
 ### 🔑 Dedicated Credentials
