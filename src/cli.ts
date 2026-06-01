@@ -51,7 +51,10 @@ function syncSkillsAfterChange(opts: { cleanOrphans?: boolean } = {}) {
   }
   const packages = discoverPackages();
   const skills = extractSkillEntries(packages);
-  const allResults = AGENT_SKILL_REGISTRY.flatMap(agent => syncSkillsToAgent(agent, skills));
+  const allResults = [
+    ...AGENT_SKILL_REGISTRY.flatMap(agent => syncSkillsToAgent(agent, skills)),
+    ...syncSkillsToCursor(skills),
+  ];
   const linked = allResults.filter(r => r.status === 'linked');
   if (linked.length > 0) {
     Logger.info(`Registered ${linked.length} skill(s) with agents:`);
