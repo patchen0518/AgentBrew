@@ -34,6 +34,8 @@ Running `agentbrew sync` adds a second layer on top:
 | **Gemini CLI** | Skills as MCP tools | + Extension slash commands |
 | **Cursor** | Skills as MCP tools (auto-registered) | No change — Cursor uses MCP natively |
 | **Windsurf** | Skills as MCP tools | + Native skill slash commands |
+| **Antigravity** | Skills as MCP tools | + Native skill slash commands |
+| **Codex CLI** | Skills as MCP tools (auto-registered) | No change — Codex uses MCP natively |
 
 > **Claude Code note:** After sync, Claude Code has both interfaces simultaneously. They are complementary, not duplicates:
 > - `/skill-name` — you or the AI explicitly invokes the skill; SKILL.md is injected as conversation context.
@@ -144,6 +146,7 @@ After syncing:
 - A clearly-marked `AgentBrew Shared` section is injected into each agent's global config (`~/.claude/CLAUDE.md`, `~/.gemini/GEMINI.md`, `~/.codex/AGENTS.md`, etc.).
 - Skills are registered as slash commands in **Claude Code** (`~/.claude/skills/`), **Gemini CLI**, **Windsurf**, and **Antigravity** via symlinks — no content is duplicated on disk.
 - For **Cursor**, agentbrew is automatically registered as an MCP server in `~/.cursor/mcp.json` — no manual steps required.
+- For **Codex CLI**, agentbrew is automatically registered as an MCP server in `~/.codex/config.toml` — no manual steps required.
 
 ```bash
 # Remove all injected instructions and skill registrations
@@ -189,8 +192,8 @@ Point your AI agent to launch `agentbrew` as its MCP server. Once connected, all
 
 - **Gemini CLI:** `gemini mcp add agentbrew agentbrew`
 - **Claude Code:** `/plugin add agentbrew agentbrew`
-- **Codex:** `codex mcp add agentbrew agentbrew`
 - **Cursor:** Run `agentbrew sync` — agentbrew is automatically registered in `~/.cursor/mcp.json`. No manual steps required.
+- **Codex CLI:** Run `agentbrew sync` — agentbrew is automatically registered in `~/.codex/config.toml` if Codex CLI is installed. Or manually: `codex mcp add agentbrew agentbrew`
 - **Windsurf / Antigravity:** Add agentbrew as an MCP server, then run `agentbrew sync` to also register slash commands.
 
 After connecting, run `agentbrew sync` to enable native slash commands and shared instructions.

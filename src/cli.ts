@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // src/cli.ts
 import { Command } from 'commander';
-import { installPackage, resolveDependencies } from './installer';
+import { installPackage, resolveDependencies, createLinkPackage } from './installer';
 import { updatePackage, updateAllPackages } from './updater';
 import { startRouter, ManagedClient } from './router';
 import { enablePackage, disablePackage, isPackageEnabled } from './state';
@@ -24,6 +24,8 @@ import {
   unsyncSkillsFromCursor,
   syncMcpServerToCursor,
   unsyncMcpServerFromCursor,
+  syncMcpServerToCodex,
+  unsyncMcpServerFromCodex,
   cleanOrphanSkills,
 } from './sync';
 import fs from 'fs';
@@ -134,6 +136,48 @@ program
   });
 
 program
+  .command('link')
+  .description('Link an existing local MCP server into AgentBrew')
+  .argument('<name>', 'Name for the linked server')
+  .argument('<command>', 'Command to run the server')
+  .argument('[args...]', 'Arguments to pass to the command')
+  .option('--env <vars...>', 'Environment variables as KEY=VALUE pairs')
+  .option('--cwd <path>', 'Working directory for the server')
+  .action(async (name: string, command: string, args: string[], options: { env?: string[], cwd?: string }) => {
+    const env: Record<string, string> = {};
+    for (const pair of options.env ?? []) {
+      const idx = pair.indexOf('=');
+      if (idx === -1) {
+        Logger.error(`Invalid env var format '${pair}'. Expected KEY=VALUE.`);
+        process.exit(1);
+      }
+      env[pair.substring(0, idx)] = pair.substring(idx + 1);
+    }
+    try {
+      await createLinkPackage(name, command, args, Object.keys(env).length > 0 ? env : undefined, options.cwd);
+      Logger.info(`Successfully linked server '${name}'`);
+
+      const packages = discoverPackages();
+      const skills = extractSkillEntries(packages);
+      const allSkillResults = [
+        ...syncSkillsToClaudeCode(skills),
+        ...syncSkillsToGeminiCLI(skills),
+        ...syncSkillsToWindsurf(skills),
+        ...syncSkillsToAntigravityCLI(skills),
+        ...syncSkillsToCursor(skills),
+      ];
+      const linked = allSkillResults.filter(r => r.status === 'linked');
+      if (linked.length > 0) {
+        Logger.info(`Registered ${linked.length} skill(s) with agents:`);
+        linked.forEach(r => Logger.info(`  + ${r.entryName}`));
+      }
+    } catch (error: any) {
+      Logger.error(`Failed to link server: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+program
   .command('update')
   .description('Update installed packages from their remote repositories')
   .argument('[packageName]', 'Name of the package to update')
@@ -151,6 +195,25 @@ program
     } catch (error: any) {
       Logger.error(error.message);
       process.exit(1);
+    }
+
+    const orphans = cleanOrphanSkills();
+    if (orphans.length > 0) {
+      Logger.info(`Removed ${orphans.length} stale skill link(s).`);
+    }
+    const updatedPackages = discoverPackages();
+    const updatedSkills = extractSkillEntries(updatedPackages);
+    const allSkillResults = [
+      ...syncSkillsToClaudeCode(updatedSkills),
+      ...syncSkillsToGeminiCLI(updatedSkills),
+      ...syncSkillsToWindsurf(updatedSkills),
+      ...syncSkillsToAntigravityCLI(updatedSkills),
+      ...syncSkillsToCursor(updatedSkills),
+    ];
+    const newlyLinked = allSkillResults.filter(r => r.status === 'linked');
+    if (newlyLinked.length > 0) {
+      Logger.info(`Registered ${newlyLinked.length} new skill(s) with agents:`);
+      newlyLinked.forEach(r => Logger.info(`  + ${r.entryName}`));
     }
   });
 
@@ -348,6 +411,12 @@ program
       }
 
       Logger.info(`Successfully uninstalled capability '${capability}' from package '${name}'`);
+
+      const orphans = cleanOrphanSkills();
+      if (orphans.length > 0) {
+        Logger.info(`Removed ${orphans.length} stale skill link(s).`);
+      }
+      syncSkillsToCursor(extractSkillEntries(discoverPackages()));
     } catch (error: any) {
       Logger.error(`Failed to uninstall capability: ${error.message}`);
       process.exit(1);
@@ -418,9 +487,15 @@ program
         }
 
         if (sources.has('OpenAI Codex CLI')) {
-          Logger.info("\nFor OpenAI Codex CLI:");
-          Logger.info("  Run: codex mcp add agentbrew agentbrew");
-          Logger.info("  Or manually add to ~/.codex/config.toml under [mcp_servers.agentbrew]");
+          const codexMcpResults = syncMcpServerToCodex();
+          const registered = codexMcpResults.find(r => r.status === 'linked' || r.status === 'already_exists');
+          if (registered) {
+            Logger.info(`\n✅  Codex CLI: agentbrew registered in ${registered.path}`);
+          } else {
+            Logger.info("\nFor OpenAI Codex CLI:");
+            Logger.info("  Run: codex mcp add agentbrew agentbrew");
+            Logger.info("  Or manually add to ~/.codex/config.toml under [mcp_servers.agentbrew]");
+          }
         }
 
         Logger.info("\nNote: You can always use 'agentbrew list' to see all available tools and skills.");
@@ -514,6 +589,9 @@ program
       ? unsyncSkillsFromCursor()   // remove stale index — MCP tools supersede it
       : syncSkillsToCursor(skills); // fallback: markdown index for non-MCP discovery
 
+    // Register agentbrew as an MCP server in Codex CLI.
+    const codexMcpResults = syncMcpServerToCodex();
+
     if (skills.length === 0) {
       Logger.info('  No skills found in installed packages.');
     } else {
@@ -523,8 +601,9 @@ program
       printSkillResults('Antigravity CLI', antigravitySkills);
       printSkillResults('Cursor MCP', cursorMcpResults);
       if (!cursorMcpOk) printSkillResults('Cursor (fallback index)', cursorSkills);
+      printSkillResults('Codex MCP', codexMcpResults);
 
-      const totalLinked = [...claudeSkills, ...geminiSkills, ...windsurfSkills, ...antigravitySkills, ...cursorMcpResults]
+      const totalLinked = [...claudeSkills, ...geminiSkills, ...windsurfSkills, ...antigravitySkills, ...cursorMcpResults, ...codexMcpResults]
         .filter(r => r.status === 'linked').length;
       if (totalLinked > 0) {
         Logger.info(`\n  Restart your agents to pick up ${totalLinked} new skill(s).`);
@@ -555,6 +634,7 @@ program
       ...unsyncSkillsFromAntigravityCLI(),
       ...unsyncSkillsFromCursor(),
       ...unsyncMcpServerFromCursor(),
+      ...unsyncMcpServerFromCodex(),
     ];
     if (allUnsyncResults.length === 0) {
       Logger.info('  No skill links to remove.');

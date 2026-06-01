@@ -21,6 +21,8 @@ import {
   unsyncSkillsFromAntigravityCLI,
   syncSkillsToCursor,
   unsyncSkillsFromCursor,
+  syncMcpServerToCodex,
+  unsyncMcpServerFromCodex,
   cleanOrphanSkills,
   SkillEntry,
 } from '../src/sync';
@@ -1038,6 +1040,128 @@ describe('cleanOrphanSkills', () => {
     expect(fs.existsSync(indexPath)).toBe(true);
     const tracked = JSON.parse(fs.readFileSync(path.join(brewRoot, 'synced-skills.json'), 'utf-8'));
     expect(tracked.cursor).toBe(true);
+  });
+});
+
+// ─── syncMcpServerToCodex ────────────────────────────────────────────────────
+
+describe('syncMcpServerToCodex', () => {
+  let codexDir: string;
+
+  beforeEach(() => {
+    codexDir = path.join(tmpDir, '.codex');
+    fs.mkdirSync(codexDir, { recursive: true });
+    jest.spyOn(os, 'homedir').mockReturnValue(tmpDir);
+  });
+
+  afterEach(() => { jest.restoreAllMocks(); });
+
+  it('creates config.toml with agentbrew section when file does not exist', () => {
+    const results = syncMcpServerToCodex(brewRoot);
+    expect(results).toHaveLength(1);
+    expect(results[0].status).toBe('linked');
+    const configPath = path.join(codexDir, 'config.toml');
+    expect(fs.existsSync(configPath)).toBe(true);
+    const content = fs.readFileSync(configPath, 'utf-8');
+    expect(content).toContain('[mcp_servers.agentbrew]');
+    expect(content).toContain('command = "agentbrew"');
+  });
+
+  it('appends agentbrew section to existing config.toml without disturbing other content', () => {
+    const configPath = path.join(codexDir, 'config.toml');
+    fs.writeFileSync(configPath, '[model]\nname = "gpt-4o"\n', 'utf-8');
+    const results = syncMcpServerToCodex(brewRoot);
+    expect(results[0].status).toBe('linked');
+    const content = fs.readFileSync(configPath, 'utf-8');
+    expect(content).toContain('[model]');
+    expect(content).toContain('[mcp_servers.agentbrew]');
+    expect(content).toContain('command = "agentbrew"');
+  });
+
+  it('reports already_exists when agentbrew is already registered', () => {
+    const configPath = path.join(codexDir, 'config.toml');
+    fs.writeFileSync(configPath, '[mcp_servers.agentbrew]\ncommand = "agentbrew"\n', 'utf-8');
+    const results = syncMcpServerToCodex(brewRoot);
+    expect(results[0].status).toBe('already_exists');
+    // File should not be modified
+    const content = fs.readFileSync(configPath, 'utf-8');
+    expect(content.split('[mcp_servers.agentbrew]').length).toBe(2);
+  });
+
+  it('returns empty array when Codex CLI is not installed', () => {
+    fs.rmSync(codexDir, { recursive: true, force: true });
+    const results = syncMcpServerToCodex(brewRoot);
+    expect(results).toHaveLength(0);
+  });
+
+  it('sets codexMcp: true in tracking file', () => {
+    syncMcpServerToCodex(brewRoot);
+    const tracked = JSON.parse(fs.readFileSync(path.join(brewRoot, 'synced-skills.json'), 'utf-8'));
+    expect(tracked.codexMcp).toBe(true);
+  });
+});
+
+// ─── unsyncMcpServerFromCodex ─────────────────────────────────────────────────
+
+describe('unsyncMcpServerFromCodex', () => {
+  let codexDir: string;
+
+  beforeEach(() => {
+    codexDir = path.join(tmpDir, '.codex');
+    fs.mkdirSync(codexDir, { recursive: true });
+    jest.spyOn(os, 'homedir').mockReturnValue(tmpDir);
+  });
+
+  afterEach(() => { jest.restoreAllMocks(); });
+
+  it('removes the agentbrew section from config.toml and sets codexMcp: false', () => {
+    const configPath = path.join(codexDir, 'config.toml');
+    fs.writeFileSync(configPath, '[mcp_servers.agentbrew]\ncommand = "agentbrew"\n', 'utf-8');
+    fs.writeFileSync(path.join(brewRoot, 'synced-skills.json'), JSON.stringify({ codexMcp: true }), 'utf-8');
+
+    const results = unsyncMcpServerFromCodex(brewRoot);
+    expect(results[0].status).toBe('removed');
+    expect(fs.existsSync(configPath)).toBe(true); // file is kept
+    const content = fs.readFileSync(configPath, 'utf-8');
+    expect(content).not.toContain('[mcp_servers.agentbrew]');
+
+    const tracked = JSON.parse(fs.readFileSync(path.join(brewRoot, 'synced-skills.json'), 'utf-8'));
+    expect(tracked.codexMcp).toBe(false);
+  });
+
+  it('leaves other sections intact when removing agentbrew', () => {
+    const configPath = path.join(codexDir, 'config.toml');
+    fs.writeFileSync(
+      configPath,
+      '[model]\nname = "gpt-4o"\n\n[mcp_servers.agentbrew]\ncommand = "agentbrew"\n\n[mcp_servers.other]\ncommand = "other"\n',
+      'utf-8'
+    );
+    fs.writeFileSync(path.join(brewRoot, 'synced-skills.json'), JSON.stringify({ codexMcp: true }), 'utf-8');
+
+    unsyncMcpServerFromCodex(brewRoot);
+    const content = fs.readFileSync(configPath, 'utf-8');
+    expect(content).toContain('[model]');
+    expect(content).toContain('[mcp_servers.other]');
+    expect(content).not.toContain('[mcp_servers.agentbrew]');
+  });
+
+  it('does nothing when codexMcp is not tracked', () => {
+    const results = unsyncMcpServerFromCodex(brewRoot);
+    expect(results).toHaveLength(0);
+  });
+
+  it('reports skipped when config.toml does not exist', () => {
+    fs.writeFileSync(path.join(brewRoot, 'synced-skills.json'), JSON.stringify({ codexMcp: true }), 'utf-8');
+    const results = unsyncMcpServerFromCodex(brewRoot);
+    expect(results[0].status).toBe('skipped');
+  });
+
+  it('reports skipped when agentbrew section is not found in existing config', () => {
+    const configPath = path.join(codexDir, 'config.toml');
+    fs.writeFileSync(configPath, '[model]\nname = "gpt-4o"\n', 'utf-8');
+    fs.writeFileSync(path.join(brewRoot, 'synced-skills.json'), JSON.stringify({ codexMcp: true }), 'utf-8');
+    const results = unsyncMcpServerFromCodex(brewRoot);
+    expect(results[0].status).toBe('skipped');
   });
 });
 

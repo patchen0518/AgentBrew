@@ -105,7 +105,11 @@ export class ManagedClient {
   }
 
   private async handleCrash() {
-    if (this.status === ClientStatus.FAILED || this.status === ClientStatus.DISCONNECTED) return;
+    if (
+      this.status === ClientStatus.FAILED ||
+      this.status === ClientStatus.DISCONNECTED ||
+      (this.status === ClientStatus.RETRYING && this.connectingPromise !== null)
+    ) return;
     this.status = ClientStatus.RETRYING;
 
     if (this.retryCount < this.maxRetries) {
@@ -241,8 +245,6 @@ export class Router {
     const transport = new StdioServerTransport();
     await this.mcpServer.connect(transport);
     Logger.info("AgentBrew MCP Router connected via Stdio");
-
-    return true;
   }
 
   private registerPackage(pkg: PackageInfo) {

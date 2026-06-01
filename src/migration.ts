@@ -109,7 +109,7 @@ export async function runMigration(): Promise<DiscoveryResult | undefined> {
         fs.copyFileSync(skill.path, targetPath);
         Logger.info(`Successfully migrated skill: ${skill.name} (copied from ${skill.path})`);
       } else {
-        // Skip silently or log if already exists
+        Logger.info(`Skipped skill: ${skill.name} (already exists at ${targetPath})`);
       }
     }
     

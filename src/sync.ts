@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import * as toml from 'smol-toml';
 import { getBrewRoot } from './config';
 import type { PackageInfo } from './registry';
 import packageJson from '../package.json';
@@ -51,6 +52,7 @@ interface SyncedState {
   cursor: boolean;
   cursorMcp: boolean;
   antigravity: string[];
+  codexMcp: boolean;
 }
 
 function getSyncedSkillsPath(brewRoot?: string): string {
@@ -62,7 +64,7 @@ function loadSyncedState(brewRoot?: string): SyncedState {
     const raw = JSON.parse(fs.readFileSync(getSyncedSkillsPath(brewRoot), 'utf-8'));
     // Migrate old flat format: { skills: [...] } → { claude: [...] }
     if (raw.skills && !raw.claude) {
-      return { claude: raw.skills, gemini: [], windsurf: [], cursor: false, cursorMcp: false, antigravity: [] };
+      return { claude: raw.skills, gemini: [], windsurf: [], cursor: false, cursorMcp: false, antigravity: [], codexMcp: false };
     }
     return {
       claude: raw.claude ?? [],
@@ -71,9 +73,10 @@ function loadSyncedState(brewRoot?: string): SyncedState {
       cursor: raw.cursor ?? false,
       cursorMcp: raw.cursorMcp ?? false,
       antigravity: raw.antigravity ?? [],
+      codexMcp: raw.codexMcp ?? false,
     };
   } catch {
-    return { claude: [], gemini: [], windsurf: [], cursor: false, cursorMcp: false, antigravity: [] };
+    return { claude: [], gemini: [], windsurf: [], cursor: false, cursorMcp: false, antigravity: [], codexMcp: false };
   }
 }
 
@@ -394,6 +397,10 @@ export function cleanOrphanSkills(brewRoot?: string): SkillSyncResult[] {
     }
   }
 
+  if (state.codexMcp && !fs.existsSync(path.join(os.homedir(), '.codex'))) {
+    state.codexMcp = false;
+  }
+
   saveSyncedState(state, brewRoot);
   return results;
 }
@@ -473,6 +480,102 @@ export function unsyncMcpServerFromCursor(brewRoot?: string): SkillSyncResult[] 
     state.cursorMcp = false;
     saveSyncedState(state, brewRoot);
     return [{ entryName, status: 'removed', path: mcpJsonPath }];
+  } catch (e: any) {
+    return [{ entryName, status: 'error', note: e.message }];
+  }
+}
+
+// ─── Codex MCP server registration ──────────────────────────────────────────
+
+function _removeTomlSection(content: string, sectionHeader: string): string {
+  const lines = content.split('\n');
+  const headerLine = `[${sectionHeader}]`;
+  const startIdx = lines.findIndex(l => l.trim() === headerLine);
+  if (startIdx === -1) return content;
+
+  let endIdx = lines.length;
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    if (lines[i].trim().startsWith('[')) { endIdx = i; break; }
+  }
+
+  // Also absorb a preceding blank line
+  let removeFrom = startIdx;
+  if (removeFrom > 0 && lines[removeFrom - 1].trim() === '') removeFrom--;
+
+  return [...lines.slice(0, removeFrom), ...lines.slice(endIdx)].join('\n');
+}
+
+/**
+ * Adds agentbrew to ~/.codex/config.toml so Codex CLI can discover MCP tools directly.
+ * Appends the [mcp_servers.agentbrew] section without disturbing existing content.
+ */
+export function syncMcpServerToCodex(brewRoot?: string): SkillSyncResult[] {
+  const codexDir = path.join(os.homedir(), '.codex');
+  if (!fs.existsSync(codexDir)) return [];
+
+  const configPath = path.join(codexDir, 'config.toml');
+  const entryName = 'agentbrew (Codex MCP)';
+
+  let raw = '';
+  try { raw = fs.readFileSync(configPath, 'utf-8'); } catch {}
+
+  // Check if already registered with the right command
+  try {
+    const parsed = toml.parse(raw) as any;
+    if (parsed?.mcp_servers?.agentbrew?.command === 'agentbrew') {
+      const state = loadSyncedState(brewRoot);
+      state.codexMcp = true;
+      saveSyncedState(state, brewRoot);
+      return [{ entryName, status: 'already_exists', path: configPath }];
+    }
+  } catch {}
+
+  // Append the new section, preserving existing content
+  const sep = raw.length > 0 && !raw.endsWith('\n') ? '\n' : '';
+  const newContent = raw + sep + '\n[mcp_servers.agentbrew]\ncommand = "agentbrew"\n';
+
+  try {
+    fs.writeFileSync(configPath, newContent, 'utf-8');
+    const state = loadSyncedState(brewRoot);
+    state.codexMcp = true;
+    saveSyncedState(state, brewRoot);
+    return [{ entryName, status: 'linked', path: configPath }];
+  } catch (e: any) {
+    return [{ entryName, status: 'error', note: e.message }];
+  }
+}
+
+/**
+ * Removes the agentbrew entry from ~/.codex/config.toml.
+ * Leaves the file in place; other sections are untouched.
+ */
+export function unsyncMcpServerFromCodex(brewRoot?: string): SkillSyncResult[] {
+  const state = loadSyncedState(brewRoot);
+  if (!state.codexMcp) return [];
+
+  const configPath = path.join(os.homedir(), '.codex', 'config.toml');
+  const entryName = 'agentbrew (Codex MCP)';
+
+  let raw: string;
+  try { raw = fs.readFileSync(configPath, 'utf-8'); } catch {
+    state.codexMcp = false;
+    saveSyncedState(state, brewRoot);
+    return [{ entryName, status: 'skipped', note: 'Not found' }];
+  }
+
+  const cleaned = _removeTomlSection(raw, 'mcp_servers.agentbrew');
+  if (cleaned === raw) {
+    state.codexMcp = false;
+    saveSyncedState(state, brewRoot);
+    return [{ entryName, status: 'skipped', note: 'Not found' }];
+  }
+
+  try {
+    const trimmed = cleaned.trimEnd();
+    fs.writeFileSync(configPath, trimmed ? trimmed + '\n' : '', 'utf-8');
+    state.codexMcp = false;
+    saveSyncedState(state, brewRoot);
+    return [{ entryName, status: 'removed', path: configPath }];
   } catch (e: any) {
     return [{ entryName, status: 'error', note: e.message }];
   }

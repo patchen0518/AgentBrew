@@ -66,23 +66,6 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, errorMessage: str
  */
 export async function generateMcpManifest(pkgPath: string, manifest: PackageManifest): Promise<McpManifestCache> {
     const cache: McpManifestCache = { ...manifest, discovered: { tools: {}, prompts: {}, resources: {}, resourceTemplates: {} } };
-    
-    // Add auto-detected prompts to discovered
-    if (manifest.prompts) {
-        cache.discovered!.prompts!["local"] = manifest.prompts.map(p => ({
-            name: p.name,
-            description: p.description
-        }));
-    }
-
-    // Add instructions to discovered resources
-    if (manifest.instructions) {
-        cache.discovered!.resources!["local"] = manifest.instructions.map(i => ({
-            name: i.name,
-            uri: `file://${path.join(pkgPath, i.file)}`,
-            description: `Instruction file: ${i.file}`
-        }));
-    }
 
     if (manifest.servers) {
         for (const server of manifest.servers) {
