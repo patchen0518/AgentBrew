@@ -2,10 +2,9 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import * as toml from 'smol-toml';
-import { Logger } from './logger';
 import type { PackageInfo } from './registry';
-import packageJson from '../package.json';
 import { SyncedState, loadSyncedState, saveSyncedState } from './sync-state';
+import { AGENT_SKILL_REGISTRY, AgentSkillConfig } from './agent-registry';
 
 export interface SkillEntry {
   packageName: string;
@@ -42,7 +41,6 @@ export function extractSkillEntries(packages: PackageInfo[]): SkillEntry[] {
   return skills;
 }
 
-const AGENTBREW_EXTENSION_NAME = 'agentbrew';
 const CURSOR_SKILLS_INDEX_FILE = 'agentbrew-skills-index.md';
 
 function symlinkSkills(
@@ -128,170 +126,84 @@ function removeTrackedSymlinks(
   return results;
 }
 
-// ─── Claude Code ────────────────────────────────────────────────────────────
-
 /**
- * Symlinks each skill directory into ~/.claude/skills/<pkgName>-<skillName>
- * so Claude Code can discover them as invocable skills.
+ * Generic skill sync for any agent in AGENT_SKILL_REGISTRY.
  */
-export function syncSkillsToClaudeCode(skills: SkillEntry[], brewRoot?: string): SkillSyncResult[] {
-  const claudeDir = path.join(os.homedir(), '.claude');
-  if (!fs.existsSync(claudeDir)) return [];
+export function syncSkillsToAgent(
+  agent: AgentSkillConfig,
+  skills: SkillEntry[],
+  brewRoot?: string
+): SkillSyncResult[] {
+  const rootDir = agent.agentRootDir?.();
+  if (rootDir && !fs.existsSync(rootDir)) return [];
 
-  const skillsDir = path.join(claudeDir, 'skills');
+  const skillsDir = agent.skillsDir();
   fs.mkdirSync(skillsDir, { recursive: true });
 
   const state = loadSyncedState(brewRoot);
-  return symlinkSkills(skills, skillsDir, state, 'claude', brewRoot);
-}
+  const results = symlinkSkills(skills, skillsDir, state, agent.key, brewRoot);
 
-/**
- * Removes all skill symlinks previously created by syncSkillsToClaudeCode.
- */
-export function unsyncSkillsFromClaudeCode(brewRoot?: string): SkillSyncResult[] {
-  const skillsDir = path.join(os.homedir(), '.claude', 'skills');
-  const state = loadSyncedState(brewRoot);
-  const results = removeTrackedSymlinks(state.claude, skillsDir);
-  state.claude = [];
-  saveSyncedState(state, brewRoot);
-  return results;
-}
-
-// ─── Gemini CLI ──────────────────────────────────────────────────────────────
-
-/**
- * Registers skills with Gemini CLI by creating an agentbrew extension at
- * ~/.gemini/extensions/agentbrew/ and symlinking each skill's directory into
- * ~/.gemini/extensions/agentbrew/skills/<pkgName>-<skillName>.
- */
-export function syncSkillsToGeminiCLI(skills: SkillEntry[], brewRoot?: string): SkillSyncResult[] {
-  const geminiDir = path.join(os.homedir(), '.gemini');
-  if (!fs.existsSync(geminiDir)) return [];
-
-  const extensionDir = path.join(geminiDir, 'extensions', AGENTBREW_EXTENSION_NAME);
-  const skillsDir = path.join(extensionDir, 'skills');
-  fs.mkdirSync(skillsDir, { recursive: true });
-
-  // Write extension manifest (we own this file)
-  const manifestPath = path.join(extensionDir, 'gemini-extension.json');
-  fs.writeFileSync(
-    manifestPath,
-    JSON.stringify({ name: AGENTBREW_EXTENSION_NAME, version: packageJson.version }, null, 2),
-    'utf-8'
-  );
-
-  // Enable extension in extension-enablement.json
-  _enableGeminiExtension(geminiDir);
-
-  const state = loadSyncedState(brewRoot);
-  return symlinkSkills(skills, skillsDir, state, 'gemini', brewRoot);
-}
-
-/**
- * Removes Gemini CLI skill symlinks, the extension manifest, and the
- * agentbrew extension entry from extension-enablement.json.
- */
-export function unsyncSkillsFromGeminiCLI(brewRoot?: string): SkillSyncResult[] {
-  const geminiDir = path.join(os.homedir(), '.gemini');
-  const extensionDir = path.join(geminiDir, 'extensions', AGENTBREW_EXTENSION_NAME);
-  const skillsDir = path.join(extensionDir, 'skills');
-
-  const state = loadSyncedState(brewRoot);
-  const results = removeTrackedSymlinks(state.gemini, skillsDir);
-
-  // Clean up extension dir (best-effort; ignores non-empty)
-  try { fs.rmSync(path.join(extensionDir, 'gemini-extension.json'), { force: true }); } catch {}
-  try { fs.rmdirSync(skillsDir); } catch {}
-  try { fs.rmdirSync(extensionDir); } catch {}
-
-  _disableGeminiExtension(geminiDir);
-
-  state.gemini = [];
-  saveSyncedState(state, brewRoot);
-  return results;
-}
-
-function _enableGeminiExtension(geminiDir: string) {
-  const enablementPath = path.join(geminiDir, 'extensions', 'extension-enablement.json');
-  let data: Record<string, any> = {};
-  try { data = JSON.parse(fs.readFileSync(enablementPath, 'utf-8')); } catch {}
-  if (!data[AGENTBREW_EXTENSION_NAME]) {
-    data[AGENTBREW_EXTENSION_NAME] = { overrides: [`${os.homedir()}/*`] };
-    fs.writeFileSync(enablementPath, JSON.stringify(data, null, 2), 'utf-8');
+  if (results.some(r => r.status === 'linked' || r.status === 'already_exists')) {
+    agent.onAfterSync?.();
   }
-}
 
-function _disableGeminiExtension(geminiDir: string) {
-  const enablementPath = path.join(geminiDir, 'extensions', 'extension-enablement.json');
-  try {
-    const data = JSON.parse(fs.readFileSync(enablementPath, 'utf-8'));
-    if (AGENTBREW_EXTENSION_NAME in data) {
-      delete data[AGENTBREW_EXTENSION_NAME];
-      if (Object.keys(data).length === 0) {
-        fs.rmSync(enablementPath, { force: true });
-      } else {
-        fs.writeFileSync(enablementPath, JSON.stringify(data, null, 2), 'utf-8');
-      }
-    }
-  } catch {}
+  return results;
 }
-
-// ─── Windsurf ────────────────────────────────────────────────────────────────
 
 /**
- * Symlinks each skill directory into ~/.codeium/windsurf/skills/<pkgName>-<skillName>
- * so Windsurf can discover them.
+ * Generic skill unsync for any agent in AGENT_SKILL_REGISTRY.
  */
+export function unsyncSkillsFromAgent(
+  agent: AgentSkillConfig,
+  brewRoot?: string
+): SkillSyncResult[] {
+  const skillsDir = agent.skillsDir();
+  const state = loadSyncedState(brewRoot);
+  const results = removeTrackedSymlinks(state[agent.key], skillsDir);
+  state[agent.key] = [];
+  saveSyncedState(state, brewRoot);
+  agent.onAfterUnsync?.();
+  return results;
+}
+
+// ─── Claude Code ────────────────────────────────────────────────────────────
+export function syncSkillsToClaudeCode(skills: SkillEntry[], brewRoot?: string): SkillSyncResult[] {
+  return syncSkillsToAgent(AGENT_SKILL_REGISTRY.find(a => a.key === 'claude')!, skills, brewRoot);
+}
+export function unsyncSkillsFromClaudeCode(brewRoot?: string): SkillSyncResult[] {
+  return unsyncSkillsFromAgent(AGENT_SKILL_REGISTRY.find(a => a.key === 'claude')!, brewRoot);
+}
+
+// ─── Gemini CLI ───────────────────────────────────────────────────────────────
+export function syncSkillsToGeminiCLI(skills: SkillEntry[], brewRoot?: string): SkillSyncResult[] {
+  return syncSkillsToAgent(AGENT_SKILL_REGISTRY.find(a => a.key === 'gemini')!, skills, brewRoot);
+}
+export function unsyncSkillsFromGeminiCLI(brewRoot?: string): SkillSyncResult[] {
+  return unsyncSkillsFromAgent(AGENT_SKILL_REGISTRY.find(a => a.key === 'gemini')!, brewRoot);
+}
+
+// ─── Windsurf ─────────────────────────────────────────────────────────────────
 export function syncSkillsToWindsurf(skills: SkillEntry[], brewRoot?: string): SkillSyncResult[] {
-  const windsurfDir = path.join(os.homedir(), '.codeium', 'windsurf');
-  if (!fs.existsSync(windsurfDir)) return [];
-
-  const skillsDir = path.join(windsurfDir, 'skills');
-  fs.mkdirSync(skillsDir, { recursive: true });
-
-  const state = loadSyncedState(brewRoot);
-  return symlinkSkills(skills, skillsDir, state, 'windsurf', brewRoot);
+  return syncSkillsToAgent(AGENT_SKILL_REGISTRY.find(a => a.key === 'windsurf')!, skills, brewRoot);
 }
-
-/**
- * Removes all Windsurf skill symlinks previously created by syncSkillsToWindsurf.
- */
 export function unsyncSkillsFromWindsurf(brewRoot?: string): SkillSyncResult[] {
-  const skillsDir = path.join(os.homedir(), '.codeium', 'windsurf', 'skills');
-  const state = loadSyncedState(brewRoot);
-  const results = removeTrackedSymlinks(state.windsurf, skillsDir);
-  state.windsurf = [];
-  saveSyncedState(state, brewRoot);
-  return results;
+  return unsyncSkillsFromAgent(AGENT_SKILL_REGISTRY.find(a => a.key === 'windsurf')!, brewRoot);
 }
 
-// ─── Antigravity CLI ─────────────────────────────────────────────────────────
-
-/**
- * Symlinks each skill directory into ~/.gemini/antigravity-cli/skills/<pkgName>-<skillName>
- * so Antigravity CLI can auto-discover them.
- */
+// ─── Antigravity CLI ──────────────────────────────────────────────────────────
 export function syncSkillsToAntigravityCLI(skills: SkillEntry[], brewRoot?: string): SkillSyncResult[] {
-  const antigravityDir = path.join(os.homedir(), '.gemini', 'antigravity-cli');
-  if (!fs.existsSync(antigravityDir)) return [];
-
-  const skillsDir = path.join(antigravityDir, 'skills');
-  fs.mkdirSync(skillsDir, { recursive: true });
-
-  const state = loadSyncedState(brewRoot);
-  return symlinkSkills(skills, skillsDir, state, 'antigravity', brewRoot);
+  return syncSkillsToAgent(AGENT_SKILL_REGISTRY.find(a => a.key === 'antigravity')!, skills, brewRoot);
+}
+export function unsyncSkillsFromAntigravityCLI(brewRoot?: string): SkillSyncResult[] {
+  return unsyncSkillsFromAgent(AGENT_SKILL_REGISTRY.find(a => a.key === 'antigravity')!, brewRoot);
 }
 
-/**
- * Removes all Antigravity CLI skill symlinks previously created by syncSkillsToAntigravityCLI.
- */
-export function unsyncSkillsFromAntigravityCLI(brewRoot?: string): SkillSyncResult[] {
-  const skillsDir = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'skills');
-  const state = loadSyncedState(brewRoot);
-  const results = removeTrackedSymlinks(state.antigravity, skillsDir);
-  state.antigravity = [];
-  saveSyncedState(state, brewRoot);
-  return results;
+// ─── Kiro ─────────────────────────────────────────────────────────────────────
+export function syncSkillsToKiro(skills: SkillEntry[], brewRoot?: string): SkillSyncResult[] {
+  return syncSkillsToAgent(AGENT_SKILL_REGISTRY.find(a => a.key === 'kiro')!, skills, brewRoot);
+}
+export function unsyncSkillsFromKiro(brewRoot?: string): SkillSyncResult[] {
+  return unsyncSkillsFromAgent(AGENT_SKILL_REGISTRY.find(a => a.key === 'kiro')!, brewRoot);
 }
 
 // ─── Orphan cleanup ──────────────────────────────────────────────────────────
@@ -304,17 +216,10 @@ export function cleanOrphanSkills(brewRoot?: string): SkillSyncResult[] {
   const state = loadSyncedState(brewRoot);
   const results: SkillSyncResult[] = [];
 
-  const agentDirs: Array<{ key: 'claude' | 'gemini' | 'windsurf' | 'antigravity' | 'kiro'; dir: string }> = [
-    { key: 'claude',      dir: path.join(os.homedir(), '.claude', 'skills') },
-    { key: 'gemini',      dir: path.join(os.homedir(), '.gemini', 'extensions', AGENTBREW_EXTENSION_NAME, 'skills') },
-    { key: 'windsurf',    dir: path.join(os.homedir(), '.codeium', 'windsurf', 'skills') },
-    { key: 'antigravity', dir: path.join(os.homedir(), '.gemini', 'antigravity-cli', 'skills') },
-    { key: 'kiro',        dir: path.join(os.homedir(), '.kiro', 'skills') },
-  ];
-
-  for (const { key, dir } of agentDirs) {
+  for (const agent of AGENT_SKILL_REGISTRY) {
+    const dir = agent.skillsDir();
     const remaining: string[] = [];
-    for (const entryName of state[key]) {
+    for (const entryName of state[agent.key]) {
       const entryPath = path.join(dir, entryName);
       let symlinkTarget: string | null = null;
       try { symlinkTarget = fs.readlinkSync(entryPath); } catch {}
@@ -331,7 +236,7 @@ export function cleanOrphanSkills(brewRoot?: string): SkillSyncResult[] {
         remaining.push(entryName);
       }
     }
-    state[key] = remaining;
+    state[agent.key] = remaining;
   }
 
   // Handle Cursor index file: parse referenced SKILL.md paths and remove the file if any are stale
@@ -455,35 +360,6 @@ export function unsyncSkillsFromCursor(brewRoot?: string): SkillSyncResult[] {
   } catch (e: any) {
     return [{ entryName: CURSOR_SKILLS_INDEX_FILE, status: 'error', note: e.message }];
   }
-}
-
-// ─── Kiro ────────────────────────────────────────────────────────────────────
-
-/**
- * Symlinks each skill directory into ~/.kiro/skills/<pkgName>-<skillName>
- * so Kiro can discover them as invocable skills.
- */
-export function syncSkillsToKiro(skills: SkillEntry[], brewRoot?: string): SkillSyncResult[] {
-  const kiroDir = path.join(os.homedir(), '.kiro');
-  if (!fs.existsSync(kiroDir)) return [];
-
-  const skillsDir = path.join(kiroDir, 'skills');
-  fs.mkdirSync(skillsDir, { recursive: true });
-
-  const state = loadSyncedState(brewRoot);
-  return symlinkSkills(skills, skillsDir, state, 'kiro', brewRoot);
-}
-
-/**
- * Removes all Kiro skill symlinks previously created by syncSkillsToKiro.
- */
-export function unsyncSkillsFromKiro(brewRoot?: string): SkillSyncResult[] {
-  const skillsDir = path.join(os.homedir(), '.kiro', 'skills');
-  const state = loadSyncedState(brewRoot);
-  const results = removeTrackedSymlinks(state.kiro, skillsDir);
-  state.kiro = [];
-  saveSyncedState(state, brewRoot);
-  return results;
 }
 
 // ─── MCP registration ────────────────────────────────────────────────────────

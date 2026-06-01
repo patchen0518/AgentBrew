@@ -31,7 +31,9 @@ import {
   syncMcpServerToKiro,
   unsyncMcpServerFromKiro,
   cleanOrphanSkills,
+  syncSkillsToAgent,
 } from './sync';
+import { AGENT_SKILL_REGISTRY } from './agent-registry';
 import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
@@ -49,14 +51,7 @@ function syncSkillsAfterChange(opts: { cleanOrphans?: boolean } = {}) {
   }
   const packages = discoverPackages();
   const skills = extractSkillEntries(packages);
-  const allResults = [
-    ...syncSkillsToClaudeCode(skills),
-    ...syncSkillsToGeminiCLI(skills),
-    ...syncSkillsToWindsurf(skills),
-    ...syncSkillsToAntigravityCLI(skills),
-    ...syncSkillsToCursor(skills),
-    ...syncSkillsToKiro(skills),
-  ];
+  const allResults = AGENT_SKILL_REGISTRY.flatMap(agent => syncSkillsToAgent(agent, skills));
   const linked = allResults.filter(r => r.status === 'linked');
   if (linked.length > 0) {
     Logger.info(`Registered ${linked.length} skill(s) with agents:`);

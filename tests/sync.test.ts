@@ -30,6 +30,25 @@ import {
   cleanOrphanSkills,
   SkillEntry,
 } from '../src/sync';
+import { AGENT_SKILL_REGISTRY, AgentSkillConfig } from '../src/agent-registry';
+
+describe('AGENT_SKILL_REGISTRY', () => {
+  it('contains entries for all five symlink-based agents', () => {
+    const keys = AGENT_SKILL_REGISTRY.map(a => a.key);
+    expect(keys).toContain('claude');
+    expect(keys).toContain('gemini');
+    expect(keys).toContain('windsurf');
+    expect(keys).toContain('antigravity');
+    expect(keys).toContain('kiro');
+  });
+
+  it('each entry produces a non-empty skillsDir string', () => {
+    for (const agent of AGENT_SKILL_REGISTRY) {
+      expect(typeof agent.skillsDir()).toBe('string');
+      expect(agent.skillsDir().length).toBeGreaterThan(0);
+    }
+  });
+});
 
 jest.mock('../src/config', () => ({
   getBrewRoot: () => brewRoot,
