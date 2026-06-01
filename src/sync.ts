@@ -53,6 +53,8 @@ interface SyncedState {
   cursorMcp: boolean;
   antigravity: string[];
   codexMcp: boolean;
+  kiro: string[];
+  kiroMcp: boolean;
 }
 
 function getSyncedSkillsPath(brewRoot?: string): string {
@@ -64,7 +66,7 @@ function loadSyncedState(brewRoot?: string): SyncedState {
     const raw = JSON.parse(fs.readFileSync(getSyncedSkillsPath(brewRoot), 'utf-8'));
     // Migrate old flat format: { skills: [...] } → { claude: [...] }
     if (raw.skills && !raw.claude) {
-      return { claude: raw.skills, gemini: [], windsurf: [], cursor: false, cursorMcp: false, antigravity: [], codexMcp: false };
+      return { claude: raw.skills, gemini: [], windsurf: [], cursor: false, cursorMcp: false, antigravity: [], codexMcp: false, kiro: [], kiroMcp: false };
     }
     return {
       claude: raw.claude ?? [],
@@ -74,9 +76,11 @@ function loadSyncedState(brewRoot?: string): SyncedState {
       cursorMcp: raw.cursorMcp ?? false,
       antigravity: raw.antigravity ?? [],
       codexMcp: raw.codexMcp ?? false,
+      kiro: raw.kiro ?? [],
+      kiroMcp: raw.kiroMcp ?? false,
     };
   } catch {
-    return { claude: [], gemini: [], windsurf: [], cursor: false, cursorMcp: false, antigravity: [], codexMcp: false };
+    return { claude: [], gemini: [], windsurf: [], cursor: false, cursorMcp: false, antigravity: [], codexMcp: false, kiro: [], kiroMcp: false };
   }
 }
 
@@ -90,7 +94,7 @@ function symlinkSkills(
   skills: SkillEntry[],
   targetDir: string,
   state: SyncedState,
-  agentKey: 'claude' | 'gemini' | 'windsurf' | 'antigravity',
+  agentKey: 'claude' | 'gemini' | 'windsurf' | 'antigravity' | 'kiro',
   brewRoot?: string
 ): SkillSyncResult[] {
   const results: SkillSyncResult[] = [];
@@ -345,11 +349,12 @@ export function cleanOrphanSkills(brewRoot?: string): SkillSyncResult[] {
   const state = loadSyncedState(brewRoot);
   const results: SkillSyncResult[] = [];
 
-  const agentDirs: Array<{ key: 'claude' | 'gemini' | 'windsurf' | 'antigravity'; dir: string }> = [
+  const agentDirs: Array<{ key: 'claude' | 'gemini' | 'windsurf' | 'antigravity' | 'kiro'; dir: string }> = [
     { key: 'claude',      dir: path.join(os.homedir(), '.claude', 'skills') },
     { key: 'gemini',      dir: path.join(os.homedir(), '.gemini', 'extensions', AGENTBREW_EXTENSION_NAME, 'skills') },
     { key: 'windsurf',    dir: path.join(os.homedir(), '.codeium', 'windsurf', 'skills') },
     { key: 'antigravity', dir: path.join(os.homedir(), '.gemini', 'antigravity-cli', 'skills') },
+    { key: 'kiro',        dir: path.join(os.homedir(), '.kiro', 'skills') },
   ];
 
   for (const { key, dir } of agentDirs) {
@@ -399,6 +404,10 @@ export function cleanOrphanSkills(brewRoot?: string): SkillSyncResult[] {
 
   if (state.codexMcp && !fs.existsSync(path.join(os.homedir(), '.codex'))) {
     state.codexMcp = false;
+  }
+
+  if (state.kiroMcp && !fs.existsSync(path.join(os.homedir(), '.kiro'))) {
+    state.kiroMcp = false;
   }
 
   saveSyncedState(state, brewRoot);
@@ -659,6 +668,118 @@ export function unsyncSkillsFromCursor(brewRoot?: string): SkillSyncResult[] {
   }
 }
 
+// ─── Kiro ────────────────────────────────────────────────────────────────────
+
+/**
+ * Symlinks each skill directory into ~/.kiro/skills/<pkgName>-<skillName>
+ * so Kiro can discover them as invocable skills.
+ */
+export function syncSkillsToKiro(skills: SkillEntry[], brewRoot?: string): SkillSyncResult[] {
+  const kiroDir = path.join(os.homedir(), '.kiro');
+  if (!fs.existsSync(kiroDir)) return [];
+
+  const skillsDir = path.join(kiroDir, 'skills');
+  fs.mkdirSync(skillsDir, { recursive: true });
+
+  const state = loadSyncedState(brewRoot);
+  return symlinkSkills(skills, skillsDir, state, 'kiro', brewRoot);
+}
+
+/**
+ * Removes all Kiro skill symlinks previously created by syncSkillsToKiro.
+ */
+export function unsyncSkillsFromKiro(brewRoot?: string): SkillSyncResult[] {
+  const skillsDir = path.join(os.homedir(), '.kiro', 'skills');
+  const state = loadSyncedState(brewRoot);
+  const results = removeTrackedSymlinks(state.kiro, skillsDir);
+  state.kiro = [];
+  saveSyncedState(state, brewRoot);
+  return results;
+}
+
+// ─── Kiro MCP server registration ────────────────────────────────────────────
+
+const KIRO_MCP_ENTRY = 'agentbrew';
+
+/**
+ * Adds agentbrew to ~/.kiro/settings/mcp.json so Kiro can discover MCP tools directly.
+ * Merges into any existing config without disturbing other servers.
+ */
+export function syncMcpServerToKiro(brewRoot?: string): SkillSyncResult[] {
+  const kiroDir = path.join(os.homedir(), '.kiro');
+  if (!fs.existsSync(kiroDir)) return [];
+
+  const settingsDir = path.join(kiroDir, 'settings');
+  fs.mkdirSync(settingsDir, { recursive: true });
+
+  const mcpJsonPath = path.join(settingsDir, 'mcp.json');
+  const entryName = 'agentbrew (Kiro MCP)';
+
+  let config: Record<string, any> = {};
+  try { config = JSON.parse(fs.readFileSync(mcpJsonPath, 'utf-8')); } catch {}
+
+  const mcpServers: Record<string, any> = config.mcpServers ?? {};
+  const existing = mcpServers[KIRO_MCP_ENTRY];
+  if (existing?.command === 'agentbrew') {
+    const state = loadSyncedState(brewRoot);
+    state.kiroMcp = true;
+    saveSyncedState(state, brewRoot);
+    return [{ entryName, status: 'already_exists', path: mcpJsonPath }];
+  }
+
+  config.mcpServers = { ...mcpServers, [KIRO_MCP_ENTRY]: { command: 'agentbrew' } };
+  try {
+    fs.writeFileSync(mcpJsonPath, JSON.stringify(config, null, 2), 'utf-8');
+    const state = loadSyncedState(brewRoot);
+    state.kiroMcp = true;
+    saveSyncedState(state, brewRoot);
+    return [{ entryName, status: 'linked', path: mcpJsonPath }];
+  } catch (e: any) {
+    return [{ entryName, status: 'error', note: e.message }];
+  }
+}
+
+/**
+ * Removes the agentbrew entry from ~/.kiro/settings/mcp.json.
+ * Leaves other servers intact; removes the file only if it becomes empty.
+ */
+export function unsyncMcpServerFromKiro(brewRoot?: string): SkillSyncResult[] {
+  const state = loadSyncedState(brewRoot);
+  if (!state.kiroMcp) return [];
+
+  const mcpJsonPath = path.join(os.homedir(), '.kiro', 'settings', 'mcp.json');
+  const entryName = 'agentbrew (Kiro MCP)';
+
+  let config: Record<string, any> = {};
+  try { config = JSON.parse(fs.readFileSync(mcpJsonPath, 'utf-8')); } catch {
+    state.kiroMcp = false;
+    saveSyncedState(state, brewRoot);
+    return [{ entryName, status: 'skipped', note: 'Not found' }];
+  }
+
+  if (!config.mcpServers?.[KIRO_MCP_ENTRY]) {
+    state.kiroMcp = false;
+    saveSyncedState(state, brewRoot);
+    return [{ entryName, status: 'skipped', note: 'Not found' }];
+  }
+
+  delete config.mcpServers[KIRO_MCP_ENTRY];
+  if (Object.keys(config.mcpServers).length === 0) delete config.mcpServers;
+
+  try {
+    if (Object.keys(config).length === 0) {
+      fs.rmSync(mcpJsonPath, { force: true });
+    } else {
+      fs.writeFileSync(mcpJsonPath, JSON.stringify(config, null, 2), 'utf-8');
+    }
+    state.kiroMcp = false;
+    saveSyncedState(state, brewRoot);
+    return [{ entryName, status: 'removed', path: mcpJsonPath }];
+  } catch (e: any) {
+    return [{ entryName, status: 'error', note: e.message }];
+  }
+}
+
 // ─── Instruction sync (unchanged) ───────────────────────────────────────────
 
 export const MARKER_START = '<!-- agentbrew:shared:start -->';
@@ -688,6 +809,17 @@ export interface AgentTarget {
   isFileOwned: boolean;
   /** Shown in sync output when configPath is null. */
   manualInstructions?: string;
+  /**
+   * Optional YAML/text block prepended verbatim at the very start of owned files.
+   * Used for agents that require frontmatter before any other content (e.g. Kiro steering files).
+   */
+  frontmatter?: string;
+  /**
+   * For isFileOwned targets, the top-level agent directory to check for existence before
+   * creating the config file. If the directory doesn't exist, the target is skipped (agent
+   * not installed). Without this, agentbrew would create the directory and file unconditionally.
+   */
+  agentRootDir?: string;
 }
 
 export function getDefaultTargets(): AgentTarget[] {
@@ -715,11 +847,21 @@ export function getDefaultTargets(): AgentTarget[] {
       // We own this specific file entirely — no markers needed.
       configPath: path.join(home, '.cursor', 'rules', 'agentbrew-shared.md'),
       isFileOwned: true,
+      agentRootDir: path.join(home, '.cursor'),
     },
     {
       name: 'Windsurf',
       configPath: path.join(home, '.codeium', 'windsurf', 'memories', 'global_rules.md'),
       isFileOwned: false,
+    },
+    {
+      name: 'Kiro',
+      // Steering files in ~/.kiro/steering/ are auto-loaded in every Kiro interaction.
+      // We own this file entirely and must place the frontmatter at the very top.
+      configPath: path.join(home, '.kiro', 'steering', 'agentbrew-shared.md'),
+      isFileOwned: true,
+      frontmatter: '---\ninclusion: always\n---',
+      agentRootDir: path.join(home, '.kiro'),
     },
   ];
 }
@@ -820,10 +962,18 @@ export function syncInstructions(targets?: AgentTarget[], brewRoot?: string): Sy
     }
 
     if (target.isFileOwned) {
+      // Skip if the agent's root directory doesn't exist (agent not installed).
+      // Without this guard, mkdirSync below would create the directory unconditionally.
+      if (target.agentRootDir && !fs.existsSync(target.agentRootDir)) {
+        results.push({ agent: target.name, status: 'skipped', note: 'Agent not installed (config directory not found)' });
+        continue;
+      }
+
       // We own this file entirely — write raw content, no markers needed.
       // unsync deletes the file; there is no surrounding user content to delimit around.
       const header = `> ⚠️ Managed by AgentBrew. Edit \`~/.agentbrew/INSTRUCTIONS.md\` and run \`agentbrew sync\` to update.\n`;
-      const fileContent = header + '\n' + content.trim() + '\n';
+      const prefix = target.frontmatter ? target.frontmatter + '\n' : '';
+      const fileContent = prefix + header + '\n' + content.trim() + '\n';
       fs.mkdirSync(path.dirname(target.configPath), { recursive: true });
       const existing = fs.existsSync(target.configPath)
         ? fs.readFileSync(target.configPath, 'utf-8')

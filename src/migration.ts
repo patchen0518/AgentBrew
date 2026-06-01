@@ -172,6 +172,7 @@ export function discoverExternalConfigs(): DiscoveryResult {
     try {
       const extensionDirs = fs.readdirSync(extensionsDir);
       for (const extDir of extensionDirs) {
+        if (extDir === 'agentbrew') continue; // skip AgentBrew's own extension to avoid self-discovery
         const fullExtPath = path.join(extensionsDir, extDir);
         if (!fs.statSync(fullExtPath).isDirectory()) continue;
         
@@ -278,6 +279,7 @@ export function discoverExternalConfigs(): DiscoveryResult {
       if (config.mcpServers) {
         for (const [name, serverConfig] of Object.entries(config.mcpServers as any)) {
           const sc = serverConfig as any;
+          if (sc.command === 'agentbrew') continue; // skip self-registered entry
           result.servers.push({
             name,
             command: sc.command,
@@ -327,6 +329,7 @@ export function discoverExternalConfigs(): DiscoveryResult {
       if (mcpServers && typeof mcpServers === 'object' && !Array.isArray(mcpServers)) {
         for (const [name, serverConfig] of Object.entries(mcpServers as Record<string, any>)) {
           const sc = serverConfig as any;
+          if (sc.command === 'agentbrew') continue; // skip self-registered entry
           result.servers.push({
             name,
             command: sc.command,
@@ -339,6 +342,33 @@ export function discoverExternalConfigs(): DiscoveryResult {
       }
     } catch (e) {
       Logger.error(`Failed to parse Codex CLI config at ${codexConfig}:`, e);
+    }
+  }
+
+  // 6. Kiro — MCP servers stored in ~/.kiro/settings/mcp.json
+  const kiroConfig = path.join(home, '.kiro', 'settings', 'mcp.json');
+  if (fs.existsSync(kiroConfig)) {
+    try {
+      const content = fs.readFileSync(kiroConfig, 'utf-8');
+      if (content.trim()) {
+        const config = JSON.parse(content);
+        if (config.mcpServers) {
+          for (const [name, serverConfig] of Object.entries(config.mcpServers as Record<string, any>)) {
+            const sc = serverConfig as any;
+            if (sc.command === 'agentbrew') continue; // skip self-registered entry
+            result.servers.push({
+              name,
+              command: sc.command,
+              args: sc.args || [],
+              env: sc.env,
+              source: 'Kiro',
+              cwd: sc.cwd,
+            });
+          }
+        }
+      }
+    } catch (e) {
+      Logger.error(`Failed to parse Kiro config at ${kiroConfig}:`, e);
     }
   }
 

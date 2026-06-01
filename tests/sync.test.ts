@@ -23,6 +23,10 @@ import {
   unsyncSkillsFromCursor,
   syncMcpServerToCodex,
   unsyncMcpServerFromCodex,
+  syncSkillsToKiro,
+  unsyncSkillsFromKiro,
+  syncMcpServerToKiro,
+  unsyncMcpServerFromKiro,
   cleanOrphanSkills,
   SkillEntry,
 } from '../src/sync';
@@ -191,6 +195,23 @@ describe('syncInstructions', () => {
     expect(content).not.toContain(MARKER_END);
   });
 
+  it('skips owned file targets when agentRootDir does not exist', () => {
+    const instructionsPath = path.join(brewRoot, 'INSTRUCTIONS.md');
+    fs.writeFileSync(instructionsPath, 'use context7', 'utf-8');
+    const kiroRoot = path.join(tmpDir, '.kiro'); // intentionally NOT created
+    const targets = [{
+      name: 'Kiro',
+      configPath: path.join(kiroRoot, 'steering', 'agentbrew-shared.md'),
+      isFileOwned: true,
+      frontmatter: '---\ninclusion: always\n---',
+      agentRootDir: kiroRoot,
+    }];
+    const results = syncInstructions(targets, brewRoot);
+    expect(results[0].status).toBe('skipped');
+    // Must not have created any files or directories
+    expect(fs.existsSync(kiroRoot)).toBe(false);
+  });
+
   it('marks manual agents without touching any file', () => {
     const instructionsPath = path.join(brewRoot, 'INSTRUCTIONS.md');
     fs.writeFileSync(instructionsPath, 'use context7', 'utf-8');
@@ -200,6 +221,29 @@ describe('syncInstructions', () => {
     const results = syncInstructions(targets, brewRoot);
     expect(results[0].status).toBe('manual');
     expect(results[0].note).toBe('Do it yourself.');
+  });
+
+  it('prepends frontmatter before content in owned files (Kiro steering)', () => {
+    const instructionsPath = path.join(brewRoot, 'INSTRUCTIONS.md');
+    fs.writeFileSync(instructionsPath, 'use context7', 'utf-8');
+    const steeringDir = path.join(tmpDir, '.kiro', 'steering');
+    fs.mkdirSync(steeringDir, { recursive: true });
+    const configPath = path.join(steeringDir, 'agentbrew-shared.md');
+    const targets = [{
+      name: 'Kiro',
+      configPath,
+      isFileOwned: true,
+      frontmatter: '---\ninclusion: always\n---',
+    }];
+    const results = syncInstructions(targets, brewRoot);
+    expect(results[0].status).toBe('created');
+    const content = fs.readFileSync(configPath, 'utf-8');
+    // Frontmatter must be at the very top
+    expect(content.startsWith('---\ninclusion: always\n---')).toBe(true);
+    // Instructions content must be present
+    expect(content).toContain('use context7');
+    // No AgentBrew markers (owned file)
+    expect(content).not.toContain(MARKER_START);
   });
 });
 
@@ -1161,6 +1205,198 @@ describe('unsyncMcpServerFromCodex', () => {
     fs.writeFileSync(configPath, '[model]\nname = "gpt-4o"\n', 'utf-8');
     fs.writeFileSync(path.join(brewRoot, 'synced-skills.json'), JSON.stringify({ codexMcp: true }), 'utf-8');
     const results = unsyncMcpServerFromCodex(brewRoot);
+    expect(results[0].status).toBe('skipped');
+  });
+});
+
+// ─── syncSkillsToKiro ────────────────────────────────────────────────────────
+
+describe('syncSkillsToKiro', () => {
+  let kiroDir: string;
+  let skillSourceDir: string;
+
+  beforeEach(() => {
+    kiroDir = path.join(tmpDir, '.kiro');
+    fs.mkdirSync(kiroDir, { recursive: true });
+    skillSourceDir = path.join(tmpDir, 'pkg', 'skills', 'my-skill');
+    fs.mkdirSync(skillSourceDir, { recursive: true });
+    fs.writeFileSync(path.join(skillSourceDir, 'SKILL.md'), '# My Skill', 'utf-8');
+    jest.spyOn(os, 'homedir').mockReturnValue(tmpDir);
+  });
+
+  afterEach(() => { jest.restoreAllMocks(); });
+
+  it('symlinks skills into ~/.kiro/skills/ and reports linked', () => {
+    const skills: SkillEntry[] = [{ packageName: 'mypkg', skillName: 'my-skill', skillDir: skillSourceDir }];
+    const results = syncSkillsToKiro(skills, brewRoot);
+    expect(results[0].status).toBe('linked');
+    const link = path.join(kiroDir, 'skills', 'mypkg-my-skill');
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(fs.readlinkSync(link)).toBe(skillSourceDir);
+  });
+
+  it('reports already_exists when symlink already points to correct target', () => {
+    const skillsDir = path.join(kiroDir, 'skills');
+    fs.mkdirSync(skillsDir, { recursive: true });
+    fs.symlinkSync(skillSourceDir, path.join(skillsDir, 'mypkg-my-skill'));
+    const skills: SkillEntry[] = [{ packageName: 'mypkg', skillName: 'my-skill', skillDir: skillSourceDir }];
+    const results = syncSkillsToKiro(skills, brewRoot);
+    expect(results[0].status).toBe('already_exists');
+  });
+
+  it('returns empty array when Kiro is not installed', () => {
+    fs.rmSync(kiroDir, { recursive: true, force: true });
+    const skills: SkillEntry[] = [{ packageName: 'mypkg', skillName: 'my-skill', skillDir: skillSourceDir }];
+    const results = syncSkillsToKiro(skills, brewRoot);
+    expect(results).toHaveLength(0);
+  });
+
+  it('tracks linked skills in kiro array of synced-skills.json', () => {
+    const skills: SkillEntry[] = [{ packageName: 'mypkg', skillName: 'my-skill', skillDir: skillSourceDir }];
+    syncSkillsToKiro(skills, brewRoot);
+    const tracked = JSON.parse(fs.readFileSync(path.join(brewRoot, 'synced-skills.json'), 'utf-8'));
+    expect(tracked.kiro).toContain('mypkg-my-skill');
+  });
+});
+
+// ─── unsyncSkillsFromKiro ────────────────────────────────────────────────────
+
+describe('unsyncSkillsFromKiro', () => {
+  let kiroDir: string;
+  let skillSourceDir: string;
+
+  beforeEach(() => {
+    kiroDir = path.join(tmpDir, '.kiro');
+    fs.mkdirSync(path.join(kiroDir, 'skills'), { recursive: true });
+    skillSourceDir = path.join(tmpDir, 'pkg', 'skills', 'my-skill');
+    fs.mkdirSync(skillSourceDir, { recursive: true });
+    jest.spyOn(os, 'homedir').mockReturnValue(tmpDir);
+  });
+
+  afterEach(() => { jest.restoreAllMocks(); });
+
+  it('removes tracked symlinks and clears kiro array', () => {
+    const linkPath = path.join(kiroDir, 'skills', 'mypkg-my-skill');
+    fs.symlinkSync(skillSourceDir, linkPath);
+    fs.writeFileSync(
+      path.join(brewRoot, 'synced-skills.json'),
+      JSON.stringify({ kiro: ['mypkg-my-skill'] }),
+      'utf-8'
+    );
+    const results = unsyncSkillsFromKiro(brewRoot);
+    expect(results[0].status).toBe('removed');
+    expect(fs.existsSync(linkPath)).toBe(false);
+    const tracked = JSON.parse(fs.readFileSync(path.join(brewRoot, 'synced-skills.json'), 'utf-8'));
+    expect(tracked.kiro).toHaveLength(0);
+  });
+});
+
+// ─── syncMcpServerToKiro ─────────────────────────────────────────────────────
+
+describe('syncMcpServerToKiro', () => {
+  let kiroDir: string;
+
+  beforeEach(() => {
+    kiroDir = path.join(tmpDir, '.kiro');
+    fs.mkdirSync(kiroDir, { recursive: true });
+    jest.spyOn(os, 'homedir').mockReturnValue(tmpDir);
+  });
+
+  afterEach(() => { jest.restoreAllMocks(); });
+
+  it('creates mcp.json with agentbrew entry when file does not exist', () => {
+    const results = syncMcpServerToKiro(brewRoot);
+    expect(results).toHaveLength(1);
+    expect(results[0].status).toBe('linked');
+    const mcpJsonPath = path.join(kiroDir, 'settings', 'mcp.json');
+    expect(fs.existsSync(mcpJsonPath)).toBe(true);
+    const config = JSON.parse(fs.readFileSync(mcpJsonPath, 'utf-8'));
+    expect(config.mcpServers.agentbrew.command).toBe('agentbrew');
+  });
+
+  it('merges into existing mcp.json without disturbing other servers', () => {
+    const settingsDir = path.join(kiroDir, 'settings');
+    fs.mkdirSync(settingsDir, { recursive: true });
+    const mcpJsonPath = path.join(settingsDir, 'mcp.json');
+    fs.writeFileSync(mcpJsonPath, JSON.stringify({ mcpServers: { other: { command: 'other' } } }), 'utf-8');
+    const results = syncMcpServerToKiro(brewRoot);
+    expect(results[0].status).toBe('linked');
+    const config = JSON.parse(fs.readFileSync(mcpJsonPath, 'utf-8'));
+    expect(config.mcpServers.other.command).toBe('other');
+    expect(config.mcpServers.agentbrew.command).toBe('agentbrew');
+  });
+
+  it('reports already_exists when agentbrew is already registered', () => {
+    const settingsDir = path.join(kiroDir, 'settings');
+    fs.mkdirSync(settingsDir, { recursive: true });
+    const mcpJsonPath = path.join(settingsDir, 'mcp.json');
+    fs.writeFileSync(mcpJsonPath, JSON.stringify({ mcpServers: { agentbrew: { command: 'agentbrew' } } }), 'utf-8');
+    const results = syncMcpServerToKiro(brewRoot);
+    expect(results[0].status).toBe('already_exists');
+  });
+
+  it('returns empty array when Kiro is not installed', () => {
+    fs.rmSync(kiroDir, { recursive: true, force: true });
+    const results = syncMcpServerToKiro(brewRoot);
+    expect(results).toHaveLength(0);
+  });
+
+  it('sets kiroMcp: true in tracking file', () => {
+    syncMcpServerToKiro(brewRoot);
+    const tracked = JSON.parse(fs.readFileSync(path.join(brewRoot, 'synced-skills.json'), 'utf-8'));
+    expect(tracked.kiroMcp).toBe(true);
+  });
+});
+
+// ─── unsyncMcpServerFromKiro ──────────────────────────────────────────────────
+
+describe('unsyncMcpServerFromKiro', () => {
+  let kiroDir: string;
+
+  beforeEach(() => {
+    kiroDir = path.join(tmpDir, '.kiro');
+    fs.mkdirSync(path.join(kiroDir, 'settings'), { recursive: true });
+    jest.spyOn(os, 'homedir').mockReturnValue(tmpDir);
+  });
+
+  afterEach(() => { jest.restoreAllMocks(); });
+
+  it('removes the agentbrew entry from mcp.json and sets kiroMcp: false', () => {
+    const mcpJsonPath = path.join(kiroDir, 'settings', 'mcp.json');
+    fs.writeFileSync(mcpJsonPath, JSON.stringify({ mcpServers: { agentbrew: { command: 'agentbrew' } } }), 'utf-8');
+    fs.writeFileSync(path.join(brewRoot, 'synced-skills.json'), JSON.stringify({ kiroMcp: true }), 'utf-8');
+
+    const results = unsyncMcpServerFromKiro(brewRoot);
+    expect(results[0].status).toBe('removed');
+    expect(fs.existsSync(mcpJsonPath)).toBe(false); // file removed when empty
+
+    const tracked = JSON.parse(fs.readFileSync(path.join(brewRoot, 'synced-skills.json'), 'utf-8'));
+    expect(tracked.kiroMcp).toBe(false);
+  });
+
+  it('leaves other servers intact when removing agentbrew', () => {
+    const mcpJsonPath = path.join(kiroDir, 'settings', 'mcp.json');
+    fs.writeFileSync(
+      mcpJsonPath,
+      JSON.stringify({ mcpServers: { agentbrew: { command: 'agentbrew' }, other: { command: 'other' } } }),
+      'utf-8'
+    );
+    fs.writeFileSync(path.join(brewRoot, 'synced-skills.json'), JSON.stringify({ kiroMcp: true }), 'utf-8');
+
+    unsyncMcpServerFromKiro(brewRoot);
+    const config = JSON.parse(fs.readFileSync(mcpJsonPath, 'utf-8'));
+    expect(config.mcpServers.other).toBeDefined();
+    expect(config.mcpServers.agentbrew).toBeUndefined();
+  });
+
+  it('does nothing when kiroMcp is not tracked', () => {
+    const results = unsyncMcpServerFromKiro(brewRoot);
+    expect(results).toHaveLength(0);
+  });
+
+  it('reports skipped when mcp.json does not exist', () => {
+    fs.writeFileSync(path.join(brewRoot, 'synced-skills.json'), JSON.stringify({ kiroMcp: true }), 'utf-8');
+    const results = unsyncMcpServerFromKiro(brewRoot);
     expect(results[0].status).toBe('skipped');
   });
 });

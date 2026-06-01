@@ -78,20 +78,23 @@ function validateUrl(url: string) {
   if (url.trim().startsWith('-')) {
     throw new Error("Invalid Git URL: URL cannot start with a dash.");
   }
-  // Basic protocol check
   const allowedProtocols = ['https:', 'git:', 'ssh:', 'http:'];
+
+  let protocol: string | null = null;
   try {
-    const parsed = new URL(url);
-    if (!allowedProtocols.includes(parsed.protocol)) {
-       // Check if it's an scp-like ssh syntax (e.g. user@host:path)
-       if (!url.includes('@') || !url.includes(':')) {
-         throw new Error(`Invalid protocol: ${parsed.protocol}`);
-       }
+    protocol = new URL(url).protocol;
+  } catch {
+    // Not a standard URL — may be scp-style SSH (e.g. git@github.com:org/repo)
+  }
+
+  if (protocol !== null) {
+    if (!allowedProtocols.includes(protocol)) {
+      throw new Error(`Invalid protocol: ${protocol}. Allowed: https, git, ssh, http.`);
     }
-  } catch (e) {
-    // If URL parsing fails, check if it's a valid SSH shortcut
+  } else {
+    // URL parsing failed; allow scp-style SSH only (requires both @ and :)
     if (!url.includes('@') || !url.includes(':')) {
-        throw new Error("Invalid Git URL format.");
+      throw new Error("Invalid Git URL format.");
     }
   }
 }

@@ -453,6 +453,7 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
   const instructionFiles = [
     'CLAUDE.md',       // Claude Code
     'GEMINI.md',       // Gemini CLI
+    'KIRO.md',         // Amazon Kiro
     'AGENTS.md',       // OpenAI Codex CLI
     '.cursorrules',    // Cursor (legacy single-file format; directory rules in .cursor/rules/ are served separately)
     '.windsurfrules',  // Windsurf (legacy; newer versions also use .windsurf/rules/)

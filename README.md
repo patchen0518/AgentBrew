@@ -13,7 +13,7 @@ AI developers today face a fragmentation problem: every agent (Claude Code, Gemi
 AgentBrew exposes skills (packages containing a `SKILL.md` file) as **MCP tools**. This is the primary delivery mechanism — it works in every agent that supports MCP, with no extra setup beyond registering agentbrew as a server.
 
 ```
-AI Agent (Claude, Gemini, Cursor, Windsurf…)
+AI Agent (Claude, Gemini, Cursor, Windsurf, Kiro…)
     │  MCP (stdio)
     ▼
 AgentBrew Router
@@ -23,7 +23,7 @@ AgentBrew Router
     │
     ├── MCP Servers → proxied to child processes (lazy-spawned)
     │
-    └── Instructions → MCP resources (CLAUDE.md, GEMINI.md, .cursorrules…)
+    └── Instructions → MCP resources (CLAUDE.md, GEMINI.md, KIRO.md, .cursorrules…)
 ```
 
 Running `agentbrew sync` adds a second layer on top:
@@ -36,6 +36,7 @@ Running `agentbrew sync` adds a second layer on top:
 | **Windsurf** | Skills as MCP tools | + Native skill slash commands |
 | **Antigravity** | Skills as MCP tools | + Native skill slash commands |
 | **Codex CLI** | Skills as MCP tools (auto-registered) | No change — Codex uses MCP natively |
+| **Amazon Kiro** | Skills as MCP tools (auto-registered) | + Steering file with shared instructions |
 
 > **Claude Code note:** After sync, Claude Code has both interfaces simultaneously. They are complementary, not duplicates:
 > - `/skill-name` — you or the AI explicitly invokes the skill; SKILL.md is injected as conversation context.
@@ -45,9 +46,8 @@ Running `agentbrew sync` adds a second layer on top:
 ## 🚀 Key Features
 - **Universal Skill Delivery:** Skills are immediately available as MCP tools in every connected agent — no sync required.
 - **Lazy Loading:** Child MCP servers only start when a tool is actually called.
-- **Auto-Discovery:** Automatically detects MCP servers in Node.js, Python, and Markdown projects.
-- **Universal Migration:** Import your existing configurations from Gemini, Claude Code, Cursor, Codex, and Windsurf.
-- **Instruction Index:** Automatically exposes per-agent instruction files (`CLAUDE.md`, `GEMINI.md`, `AGENTS.md`, `.cursorrules`, etc.) shipped inside packages as MCP resources.
+- **Auto-Discovery:** Automatically detects MCP servers in Node.js, Python, and Markdown projects. Detects per-agent instruction files (`CLAUDE.md`, `GEMINI.md`, `KIRO.md`, `AGENTS.md`, `.cursorrules`, etc.) shipped inside packages.
+- **Universal Migration:** Import your existing configurations from Gemini, Claude Code, Cursor, Codex, Windsurf, and Kiro.
 - **Shared Instructions:** Write agent instructions once in `~/.agentbrew/INSTRUCTIONS.md` and push them to every agent's global config with `agentbrew sync`.
 - **Native Slash Commands (optional):** `agentbrew sync` also registers skills as native slash commands in Claude Code, Gemini CLI, Windsurf, and Antigravity.
 
@@ -98,7 +98,7 @@ Step 3 is optional but recommended — it unlocks slash command discoverability 
 # Install a tool or skill package from a Git URL
 agentbrew install <github-url>
 
-# Migrate from Gemini, Claude, or Cursor
+# Migrate from Gemini, Claude, Cursor, Codex, Windsurf, or Kiro
 agentbrew migrate
 ```
 
@@ -147,6 +147,7 @@ After syncing:
 - Skills are registered as slash commands in **Claude Code** (`~/.claude/skills/`), **Gemini CLI**, **Windsurf**, and **Antigravity** via symlinks — no content is duplicated on disk.
 - For **Cursor**, agentbrew is automatically registered as an MCP server in `~/.cursor/mcp.json` — no manual steps required.
 - For **Codex CLI**, agentbrew is automatically registered as an MCP server in `~/.codex/config.toml` — no manual steps required.
+- For **Amazon Kiro**, agentbrew is automatically registered as an MCP server in `~/.kiro/settings/mcp.json`, and shared instructions are written to `~/.kiro/steering/agentbrew-shared.md` (always-active steering file) — no manual steps required.
 
 ```bash
 # Remove all injected instructions and skill registrations
@@ -154,7 +155,7 @@ agentbrew unsync
 ```
 
 > [!NOTE]
-> `agentbrew sync` only writes to config files whose parent directory already exists (i.e. the agent is installed). It skips agents that aren't detected on your machine.
+> `agentbrew sync` only writes to agents that are detected as installed on your machine (their config directory must exist). Agents you haven't installed are silently skipped.
 
 > **Advanced:** Claude Code users who prefer skills to be accessible only via slash commands (and not as AI-callable MCP tools) can set `"skillsAsMcpTools": false` in `~/.agentbrew/state.json`. The default is `true` — both interfaces are active.
 
@@ -194,6 +195,7 @@ Point your AI agent to launch `agentbrew` as its MCP server. Once connected, all
 - **Claude Code:** `/plugin add agentbrew agentbrew`
 - **Cursor:** Run `agentbrew sync` — agentbrew is automatically registered in `~/.cursor/mcp.json`. No manual steps required.
 - **Codex CLI:** Run `agentbrew sync` — agentbrew is automatically registered in `~/.codex/config.toml` if Codex CLI is installed. Or manually: `codex mcp add agentbrew agentbrew`
+- **Amazon Kiro:** Run `agentbrew sync` — agentbrew is automatically registered in `~/.kiro/settings/mcp.json` if Kiro is installed. No manual steps required.
 - **Windsurf / Antigravity:** Add agentbrew as an MCP server, then run `agentbrew sync` to also register slash commands.
 
 After connecting, run `agentbrew sync` to enable native slash commands and shared instructions.

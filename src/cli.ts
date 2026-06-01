@@ -26,6 +26,10 @@ import {
   unsyncMcpServerFromCursor,
   syncMcpServerToCodex,
   unsyncMcpServerFromCodex,
+  syncSkillsToKiro,
+  unsyncSkillsFromKiro,
+  syncMcpServerToKiro,
+  unsyncMcpServerFromKiro,
   cleanOrphanSkills,
 } from './sync';
 import fs from 'fs';
@@ -51,6 +55,7 @@ function syncSkillsAfterChange(opts: { cleanOrphans?: boolean } = {}) {
     ...syncSkillsToWindsurf(skills),
     ...syncSkillsToAntigravityCLI(skills),
     ...syncSkillsToCursor(skills),
+    ...syncSkillsToKiro(skills),
   ];
   const linked = allResults.filter(r => r.status === 'linked');
   if (linked.length > 0) {
@@ -569,6 +574,10 @@ program
     // Register agentbrew as an MCP server in Codex CLI.
     const codexMcpResults = syncMcpServerToCodex();
 
+    // Register skills and MCP server in Kiro.
+    const kiroSkills = syncSkillsToKiro(skills);
+    const kiroMcpResults = syncMcpServerToKiro();
+
     if (skills.length === 0) {
       Logger.info('  No skills found in installed packages.');
     } else {
@@ -579,9 +588,13 @@ program
       printSkillResults('Cursor MCP', cursorMcpResults);
       if (!cursorMcpOk) printSkillResults('Cursor (fallback index)', cursorSkills);
       printSkillResults('Codex MCP', codexMcpResults);
+      printSkillResults('Kiro', kiroSkills);
+      printSkillResults('Kiro MCP', kiroMcpResults);
 
-      const totalLinked = [...claudeSkills, ...geminiSkills, ...windsurfSkills, ...antigravitySkills, ...cursorMcpResults, ...codexMcpResults]
-        .filter(r => r.status === 'linked').length;
+      const totalLinked = [
+        ...claudeSkills, ...geminiSkills, ...windsurfSkills, ...antigravitySkills,
+        ...cursorMcpResults, ...codexMcpResults, ...kiroSkills, ...kiroMcpResults,
+      ].filter(r => r.status === 'linked').length;
       if (totalLinked > 0) {
         Logger.info(`\n  Restart your agents to pick up ${totalLinked} new skill(s).`);
       }
@@ -612,6 +625,8 @@ program
       ...unsyncSkillsFromCursor(),
       ...unsyncMcpServerFromCursor(),
       ...unsyncMcpServerFromCodex(),
+      ...unsyncSkillsFromKiro(),
+      ...unsyncMcpServerFromKiro(),
     ];
     if (allUnsyncResults.length === 0) {
       Logger.info('  No skill links to remove.');

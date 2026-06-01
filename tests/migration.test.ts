@@ -121,6 +121,111 @@ describe('Discovery Engine', () => {
     }));
   });
 
+  test('filters agentbrew self-entry from Cursor MCP config', () => {
+    const cursorConfig = path.join(home, '.cursor', 'mcp.json');
+    (fs.existsSync as jest.Mock).mockImplementation((p) => p === cursorConfig);
+    (fs.readFileSync as jest.Mock).mockImplementation((p) => {
+      if (p === cursorConfig) {
+        return JSON.stringify({
+          mcpServers: {
+            agentbrew: { command: 'agentbrew' },
+            'real-server': { command: 'npx', args: ['@mcp/real'] }
+          }
+        });
+      }
+      return '';
+    });
+
+    const result = discoverExternalConfigs();
+
+    expect(result.servers.find(s => s.name === 'agentbrew')).toBeUndefined();
+    expect(result.servers).toContainEqual(expect.objectContaining({ name: 'real-server', source: 'Cursor' }));
+  });
+
+  test('filters agentbrew self-entry from Codex MCP config', () => {
+    const codexConfig = path.join(home, '.codex', 'config.toml');
+    (fs.existsSync as jest.Mock).mockImplementation((p) => p === codexConfig);
+    (fs.readFileSync as jest.Mock).mockImplementation((p) => {
+      if (p === codexConfig) {
+        return '[mcp_servers.agentbrew]\ncommand = "agentbrew"\n\n[mcp_servers.other]\ncommand = "other-tool"\n';
+      }
+      return '';
+    });
+
+    const result = discoverExternalConfigs();
+
+    expect(result.servers.find(s => s.name === 'agentbrew')).toBeUndefined();
+    expect(result.servers).toContainEqual(expect.objectContaining({ name: 'other', source: 'OpenAI Codex CLI' }));
+  });
+
+  test('skips agentbrew extension dir when discovering Gemini skills', () => {
+    const extensionsDir = path.join(home, '.gemini', 'extensions');
+    const agentbrewExtDir = path.join(extensionsDir, 'agentbrew');
+    const agentbrewSkillsDir = path.join(agentbrewExtDir, 'skills');
+    const agentbrewSkillFile = path.join(agentbrewSkillsDir, 'some-skill.md');
+
+    (fs.existsSync as jest.Mock).mockImplementation((p) =>
+      [extensionsDir, agentbrewExtDir, agentbrewSkillsDir, agentbrewSkillFile].includes(p)
+    );
+    (fs.readdirSync as jest.Mock).mockImplementation((p) => {
+      if (p === extensionsDir) return ['agentbrew'];
+      if (p === agentbrewSkillsDir) return ['some-skill.md'];
+      return [];
+    });
+    (fs.statSync as jest.Mock).mockImplementation((p) => ({
+      isDirectory: () => [extensionsDir, agentbrewExtDir, agentbrewSkillsDir].includes(p)
+    }));
+
+    const result = discoverExternalConfigs();
+
+    expect(result.skills).toHaveLength(0);
+  });
+
+  test('discovers Kiro MCP servers', () => {
+    const kiroConfig = path.join(home, '.kiro', 'settings', 'mcp.json');
+    (fs.existsSync as jest.Mock).mockImplementation((p) => p === kiroConfig);
+    (fs.readFileSync as jest.Mock).mockImplementation((p) => {
+      if (p === kiroConfig) {
+        return JSON.stringify({
+          mcpServers: {
+            'kiro-server': { command: 'node', args: ['kiro.js'] }
+          }
+        });
+      }
+      return '';
+    });
+
+    const result = discoverExternalConfigs();
+
+    expect(result.servers).toContainEqual(expect.objectContaining({
+      name: 'kiro-server',
+      source: 'Kiro',
+      command: 'node',
+      args: ['kiro.js']
+    }));
+  });
+
+  test('filters agentbrew self-entry from Kiro MCP config', () => {
+    const kiroConfig = path.join(home, '.kiro', 'settings', 'mcp.json');
+    (fs.existsSync as jest.Mock).mockImplementation((p) => p === kiroConfig);
+    (fs.readFileSync as jest.Mock).mockImplementation((p) => {
+      if (p === kiroConfig) {
+        return JSON.stringify({
+          mcpServers: {
+            agentbrew: { command: 'agentbrew' },
+            'other-server': { command: 'npx', args: ['@some/server'] }
+          }
+        });
+      }
+      return '';
+    });
+
+    const result = discoverExternalConfigs();
+
+    expect(result.servers.find(s => s.name === 'agentbrew')).toBeUndefined();
+    expect(result.servers).toContainEqual(expect.objectContaining({ name: 'other-server', source: 'Kiro' }));
+  });
+
   test('discovers Gemini skills', () => {
     const extensionsDir = path.join(home, '.gemini', 'extensions');
     const extDir = path.join(extensionsDir, 'test-ext');
