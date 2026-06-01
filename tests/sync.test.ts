@@ -1226,6 +1226,32 @@ describe('unsyncMcpServerFromCodex', () => {
     const results = unsyncMcpServerFromCodex(brewRoot);
     expect(results[0].status).toBe('skipped');
   });
+
+  it('removes the agentbrew section when header has a trailing inline comment', () => {
+    const configPath = path.join(codexDir, 'config.toml');
+    fs.writeFileSync(
+      configPath,
+      '[mcp_servers.agentbrew] # managed by agentbrew\ncommand = "agentbrew"\n',
+      'utf-8'
+    );
+    fs.writeFileSync(path.join(brewRoot, 'synced-skills.json'), JSON.stringify({ codexMcp: true }), 'utf-8');
+    const results = unsyncMcpServerFromCodex(brewRoot);
+    expect(results[0].status).toBe('removed');
+    expect(fs.readFileSync(configPath, 'utf-8')).not.toContain('[mcp_servers.agentbrew]');
+  });
+
+  it('removes the agentbrew section when file uses CRLF line endings', () => {
+    const configPath = path.join(codexDir, 'config.toml');
+    fs.writeFileSync(
+      configPath,
+      '[mcp_servers.agentbrew]\r\ncommand = "agentbrew"\r\n',
+      'utf-8'
+    );
+    fs.writeFileSync(path.join(brewRoot, 'synced-skills.json'), JSON.stringify({ codexMcp: true }), 'utf-8');
+    const results = unsyncMcpServerFromCodex(brewRoot);
+    expect(results[0].status).toBe('removed');
+    expect(fs.readFileSync(configPath, 'utf-8')).not.toContain('[mcp_servers.agentbrew]');
+  });
 });
 
 // ─── syncSkillsToKiro ────────────────────────────────────────────────────────

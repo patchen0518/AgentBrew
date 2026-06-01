@@ -89,10 +89,15 @@ export function unsyncMcpServerFromCursor(brewRoot?: string): SkillSyncResult[] 
 // ─── Codex MCP server registration ──────────────────────────────────────────
 
 function _removeTomlSection(content: string, sectionHeader: string): string {
-  const lines = content.split('\n');
+  const normalised = content.replace(/\r\n/g, '\n');
+  const lines = normalised.split('\n');
   const headerLine = `[${sectionHeader}]`;
   const subHeaderPrefix = `[${sectionHeader}.`;
-  const startIdx = lines.findIndex(l => l.trim() === headerLine);
+
+  const startIdx = lines.findIndex(l => {
+    const stripped = l.replace(/#.*$/, '').trim();
+    return stripped === headerLine;
+  });
   if (startIdx === -1) return content;
 
   let endIdx = lines.length;
