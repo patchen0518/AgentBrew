@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import packageJson from '../package.json';
+import { Logger } from './logger';
 
 const AGENTBREW_EXTENSION_NAME = 'agentbrew';
 
@@ -31,7 +32,9 @@ export interface AgentSkillConfig {
 function enableGeminiExtension(geminiDir: string): void {
   const enablementPath = path.join(geminiDir, 'extensions', 'extension-enablement.json');
   let data: Record<string, any> = {};
-  try { data = JSON.parse(fs.readFileSync(enablementPath, 'utf-8')); } catch {}
+  try { data = JSON.parse(fs.readFileSync(enablementPath, 'utf-8')); } catch (e: any) {
+    if (e.code !== 'ENOENT') Logger.warn(`Could not read/update extension-enablement.json: ${e.message}`);
+  }
   if (!data[AGENTBREW_EXTENSION_NAME]) {
     data[AGENTBREW_EXTENSION_NAME] = { overrides: [`${os.homedir()}/*`] };
     fs.writeFileSync(enablementPath, JSON.stringify(data, null, 2), 'utf-8');
@@ -50,7 +53,9 @@ function disableGeminiExtension(geminiDir: string): void {
         fs.writeFileSync(enablementPath, JSON.stringify(data, null, 2), 'utf-8');
       }
     }
-  } catch {}
+  } catch (e: any) {
+    if (e.code !== 'ENOENT') Logger.warn(`Could not read/update extension-enablement.json: ${e.message}`);
+  }
 }
 
 export const AGENT_SKILL_REGISTRY: AgentSkillConfig[] = [

@@ -5,6 +5,7 @@ import * as toml from 'smol-toml';
 import type { PackageInfo } from './registry';
 import { SyncedState, loadSyncedState, saveSyncedState } from './sync-state';
 import { AGENT_SKILL_REGISTRY, AgentSkillConfig } from './agent-registry';
+import { Logger } from './logger';
 
 export interface SkillEntry {
   packageName: string;
@@ -63,11 +64,15 @@ function symlinkSkills(
     }
 
     let exists = false;
-    try { fs.lstatSync(entryPath); exists = true; } catch {}
+    try { fs.lstatSync(entryPath); exists = true; } catch (e: any) {
+      if (e.code !== 'ENOENT') Logger.warn(`Unexpected error checking ${entryName}: ${e.message}`);
+    }
 
     if (exists) {
       let currentTarget: string | null = null;
-      try { currentTarget = fs.readlinkSync(entryPath); } catch {}
+      try { currentTarget = fs.readlinkSync(entryPath); } catch (e: any) {
+        if (e.code !== 'ENOENT') Logger.warn(`Unexpected error checking ${entryName}: ${e.message}`);
+      }
 
       if (currentTarget === null) {
         // Not a symlink — not created by AgentBrew, leave it alone
@@ -82,7 +87,9 @@ function symlinkSkills(
       }
 
       // Stale symlink pointing at a different target — remove and re-create
-      try { fs.rmSync(entryPath, { force: true }); } catch {}
+      try { fs.rmSync(entryPath, { force: true }); } catch (e: any) {
+        Logger.warn(`Could not remove ${entryPath}: ${e.message}`);
+      }
     }
 
     try {
@@ -108,7 +115,9 @@ function removeTrackedSymlinks(
   for (const entryName of tracked) {
     const entryPath = path.join(skillsDir, entryName);
     let exists = false;
-    try { fs.lstatSync(entryPath); exists = true; } catch {}
+    try { fs.lstatSync(entryPath); exists = true; } catch (e: any) {
+      if (e.code !== 'ENOENT') Logger.warn(`Unexpected error checking ${entryName}: ${e.message}`);
+    }
 
     if (!exists) {
       results.push({ entryName, status: 'skipped', note: 'Not found' });
@@ -222,7 +231,9 @@ export function cleanOrphanSkills(brewRoot?: string): SkillSyncResult[] {
     for (const entryName of state[agent.key]) {
       const entryPath = path.join(dir, entryName);
       let symlinkTarget: string | null = null;
-      try { symlinkTarget = fs.readlinkSync(entryPath); } catch {}
+      try { symlinkTarget = fs.readlinkSync(entryPath); } catch (e: any) {
+        if (e.code !== 'ENOENT') Logger.warn(`Unexpected error checking ${entryName}: ${e.message}`);
+      }
 
       if (symlinkTarget !== null && !fs.existsSync(symlinkTarget)) {
         try {
@@ -344,7 +355,9 @@ export function unsyncSkillsFromCursor(brewRoot?: string): SkillSyncResult[] {
   const indexPath = path.join(os.homedir(), '.cursor', 'rules', CURSOR_SKILLS_INDEX_FILE);
 
   let exists = false;
-  try { fs.lstatSync(indexPath); exists = true; } catch {}
+  try { fs.lstatSync(indexPath); exists = true; } catch (e: any) {
+    if (e.code !== 'ENOENT') Logger.warn(`Unexpected error checking ${CURSOR_SKILLS_INDEX_FILE}: ${e.message}`);
+  }
 
   if (!exists) {
     state.cursor = false;
