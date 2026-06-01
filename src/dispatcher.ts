@@ -3,6 +3,7 @@ import { Tool, Prompt, Resource, ResourceTemplate } from "@modelcontextprotocol/
 import { ManagedClient } from "./router";
 import fs from 'fs';
 import path from 'path';
+import { Logger } from './logger';
 
 export interface LocalPrompt {
   pkgPath: string;
@@ -293,7 +294,9 @@ export class CapabilityDispatch {
       try {
         const client = await this.getClient(mapping.prefix);
         return await client.readResource({ uri: mapping.originalUri });
-      } catch (e) {}
+      } catch (e: any) {
+        Logger.debug(`readResource direct mapping failed for ${uri}: ${e.message}`);
+      }
     }
 
     // Fallback to unscoping for templated or unknown URIs
@@ -302,7 +305,9 @@ export class CapabilityDispatch {
       try {
         const client = await this.getClient(unscoped.prefix);
         return await client.readResource({ uri: unscoped.originalUri });
-      } catch (e) {}
+      } catch (e: any) {
+        Logger.debug(`readResource unscope fallback failed for ${uri}: ${e.message}`);
+      }
     }
 
     throw new Error(`Resource not found: ${uri}`);

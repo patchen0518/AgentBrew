@@ -530,9 +530,10 @@ export function syncMcpServerToCodex(brewRoot?: string): SkillSyncResult[] {
     }
   } catch {}
 
-  // Append the new section, preserving existing content
-  const sep = raw.length > 0 && !raw.endsWith('\n') ? '\n' : '';
-  const newContent = raw + sep + '\n[mcp_servers.agentbrew]\ncommand = "agentbrew"\n';
+  // Remove any stale entry (e.g. wrong command) before re-adding to avoid duplicate TOML table headers
+  const cleaned = _removeTomlSection(raw, 'mcp_servers.agentbrew');
+  const sep = cleaned.length > 0 && !cleaned.endsWith('\n') ? '\n' : '';
+  const newContent = cleaned + sep + '\n[mcp_servers.agentbrew]\ncommand = "agentbrew"\n';
 
   try {
     fs.writeFileSync(configPath, newContent, 'utf-8');

@@ -3,7 +3,7 @@
 import { Command } from 'commander';
 import { installPackage, resolveDependencies, createLinkPackage } from './installer';
 import { updatePackage, updateAllPackages } from './updater';
-import { startRouter, ManagedClient } from './router';
+import { startRouter } from './router';
 import { enablePackage, disablePackage, isPackageEnabled } from './state';
 import { discoverPackages, PackageInfo, McpManifestCache, findManifests, generateMcpManifest, warnIfDiscoveryFailed } from './registry';
 import { runMigration, discoverExternalConfigs } from './migration';
@@ -35,6 +35,29 @@ import readline from 'readline';
 import * as toml from 'smol-toml';
 
 import { Logger } from './logger';
+
+function syncSkillsAfterChange(opts: { cleanOrphans?: boolean } = {}) {
+  if (opts.cleanOrphans) {
+    const orphans = cleanOrphanSkills();
+    if (orphans.length > 0) {
+      Logger.info(`Removed ${orphans.length} stale skill link(s).`);
+    }
+  }
+  const packages = discoverPackages();
+  const skills = extractSkillEntries(packages);
+  const allResults = [
+    ...syncSkillsToClaudeCode(skills),
+    ...syncSkillsToGeminiCLI(skills),
+    ...syncSkillsToWindsurf(skills),
+    ...syncSkillsToAntigravityCLI(skills),
+    ...syncSkillsToCursor(skills),
+  ];
+  const linked = allResults.filter(r => r.status === 'linked');
+  if (linked.length > 0) {
+    Logger.info(`Registered ${linked.length} skill(s) with agents:`);
+    linked.forEach(r => Logger.info(`  + ${r.entryName}`));
+  }
+}
 
 export const program = new Command();
 
@@ -113,22 +136,7 @@ program
         return answer.toLowerCase() === 'y';
       });
       Logger.info(`Successfully installed package from ${url}`);
-
-      // Sync newly installed skills to all agents
-      const packages = discoverPackages();
-      const skills = extractSkillEntries(packages);
-      const allSkillResults = [
-        ...syncSkillsToClaudeCode(skills),
-        ...syncSkillsToGeminiCLI(skills),
-        ...syncSkillsToWindsurf(skills),
-        ...syncSkillsToAntigravityCLI(skills),
-        ...syncSkillsToCursor(skills),
-      ];
-      const linked = allSkillResults.filter(r => r.status === 'linked');
-      if (linked.length > 0) {
-        Logger.info(`Registered ${linked.length} skill(s) with agents:`);
-        linked.forEach(r => Logger.info(`  + ${r.entryName}`));
-      }
+      syncSkillsAfterChange();
     } catch (error: any) {
       Logger.error(`Failed to install package: ${error.message}`);
       process.exit(1);
@@ -156,21 +164,7 @@ program
     try {
       await createLinkPackage(name, command, args, Object.keys(env).length > 0 ? env : undefined, options.cwd);
       Logger.info(`Successfully linked server '${name}'`);
-
-      const packages = discoverPackages();
-      const skills = extractSkillEntries(packages);
-      const allSkillResults = [
-        ...syncSkillsToClaudeCode(skills),
-        ...syncSkillsToGeminiCLI(skills),
-        ...syncSkillsToWindsurf(skills),
-        ...syncSkillsToAntigravityCLI(skills),
-        ...syncSkillsToCursor(skills),
-      ];
-      const linked = allSkillResults.filter(r => r.status === 'linked');
-      if (linked.length > 0) {
-        Logger.info(`Registered ${linked.length} skill(s) with agents:`);
-        linked.forEach(r => Logger.info(`  + ${r.entryName}`));
-      }
+      syncSkillsAfterChange();
     } catch (error: any) {
       Logger.error(`Failed to link server: ${error.message}`);
       process.exit(1);
@@ -197,24 +191,7 @@ program
       process.exit(1);
     }
 
-    const orphans = cleanOrphanSkills();
-    if (orphans.length > 0) {
-      Logger.info(`Removed ${orphans.length} stale skill link(s).`);
-    }
-    const updatedPackages = discoverPackages();
-    const updatedSkills = extractSkillEntries(updatedPackages);
-    const allSkillResults = [
-      ...syncSkillsToClaudeCode(updatedSkills),
-      ...syncSkillsToGeminiCLI(updatedSkills),
-      ...syncSkillsToWindsurf(updatedSkills),
-      ...syncSkillsToAntigravityCLI(updatedSkills),
-      ...syncSkillsToCursor(updatedSkills),
-    ];
-    const newlyLinked = allSkillResults.filter(r => r.status === 'linked');
-    if (newlyLinked.length > 0) {
-      Logger.info(`Registered ${newlyLinked.length} new skill(s) with agents:`);
-      newlyLinked.forEach(r => Logger.info(`  + ${r.entryName}`));
-    }
+    syncSkillsAfterChange({ cleanOrphans: true });
   });
 
 program

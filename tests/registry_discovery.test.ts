@@ -170,6 +170,8 @@ args = ["index.js"]
     const packages = discoverPackages(true);
     expect(packages.length).toBe(1);
     expect(packages[0].manifest.servers).toBeDefined();
-    expect(packages[0].manifest.servers?.[0].command).toBe('poetry run python');
+    expect(packages[0].manifest.servers?.[0].command).toBe('poetry');
+    expect(packages[0].manifest.servers?.[0].args[0]).toBe('run');
+    expect(packages[0].manifest.servers?.[0].args[1]).toBe('python');
   });
 });

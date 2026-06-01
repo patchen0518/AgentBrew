@@ -98,28 +98,28 @@ export async function generateMcpManifest(pkgPath: string, manifest: PackageMani
                     const result = await client.listTools();
                     toolsList = result.tools || [];
                 } catch (e: any) {
-                    Logger.info(`Server ${server.name} does not support tools discovery: ${e.message}`);
+                    Logger.debug(`Server ${server.name} does not support tools discovery: ${e.message}`);
                 }
 
                 try {
                     const result = await client.listPrompts();
                     promptsList = result.prompts || [];
                 } catch (e: any) {
-                    Logger.info(`Server ${server.name} does not support prompts discovery: ${e.message}`);
+                    Logger.debug(`Server ${server.name} does not support prompts discovery: ${e.message}`);
                 }
 
                 try {
                     const result = await client.listResources();
                     resourcesList = result.resources || [];
                 } catch (e: any) {
-                    Logger.info(`Server ${server.name} does not support resources discovery: ${e.message}`);
+                    Logger.debug(`Server ${server.name} does not support resources discovery: ${e.message}`);
                 }
 
                 try {
                     const result = await client.listResourceTemplates();
                     resourceTemplatesList = result.resourceTemplates || [];
                 } catch (e: any) {
-                    Logger.info(`Server ${server.name} does not support resource templates discovery: ${e.message}`);
+                    Logger.debug(`Server ${server.name} does not support resource templates discovery: ${e.message}`);
                 }
 
                 if (cache.discovered) {
@@ -199,6 +199,37 @@ export function discoverPackages(includeDisabled = false): PackageInfo[] {
   return packages;
 }
 
+function parseSkillDescription(filePath: string): string | undefined {
+  try {
+    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+    if (lines[0]?.trim() === '---') {
+      const fmEnd = lines.indexOf('---', 1);
+      if (fmEnd > 0) {
+        const fmLines = lines.slice(1, fmEnd);
+        const descIdx = fmLines.findIndex(l => /^description\s*:/.test(l));
+        if (descIdx >= 0) {
+          const inline = fmLines[descIdx].replace(/^description\s*:\s*/, '').trim();
+          if (inline === '>-' || inline === '>' || inline === '|' || inline === '|-') {
+            const blockLines: string[] = [];
+            for (let i = descIdx + 1; i < fmLines.length; i++) {
+              if (/^\s/.test(fmLines[i])) blockLines.push(fmLines[i].trim());
+              else break;
+            }
+            return blockLines.join(' ');
+          }
+          return inline.replace(/^"|"$/g, '').trim();
+        }
+        const heading = lines.slice(fmEnd + 1).find(l => /^#+\s/.test(l));
+        if (heading) return heading.replace(/^#+\s*/, '').trim();
+      }
+    } else {
+      const firstNonEmpty = lines.find(l => l.trim().length > 0);
+      if (firstNonEmpty) return firstNonEmpty.replace(/^#+\s*/, '').trim();
+    }
+  } catch {}
+  return undefined;
+}
+
 export function findManifests(currentPath: string, depth: number): { path: string, manifest: PackageManifest }[] {
     const results: { path: string, manifest: PackageManifest }[] = [];
     
@@ -215,30 +246,8 @@ export function findManifests(currentPath: string, depth: number): { path: strin
             if (manifest.prompts) {
                 for (const prompt of manifest.prompts) {
                     if (path.basename(prompt.file).toUpperCase() !== 'SKILL.MD') continue;
-                    try {
-                        const skillPath = path.resolve(currentPath, prompt.file);
-                        const lines = fs.readFileSync(skillPath, 'utf-8').split('\n');
-                        if (lines[0]?.trim() === '---') {
-                            const fmEnd = lines.indexOf('---', 1);
-                            if (fmEnd > 0) {
-                                const fmLines = lines.slice(1, fmEnd);
-                                const descIdx = fmLines.findIndex((l: string) => /^description\s*:/.test(l));
-                                if (descIdx >= 0) {
-                                    const inline = fmLines[descIdx].replace(/^description\s*:\s*/, '').trim();
-                                    if (inline === '>-' || inline === '>' || inline === '|' || inline === '|-') {
-                                        const blockLines: string[] = [];
-                                        for (let i = descIdx + 1; i < fmLines.length; i++) {
-                                            if (/^\s/.test(fmLines[i])) blockLines.push(fmLines[i].trim());
-                                            else break;
-                                        }
-                                        prompt.description = blockLines.join(' ');
-                                    } else {
-                                        prompt.description = inline.replace(/^"|"$/g, '').trim();
-                                    }
-                                }
-                            }
-                        }
-                    } catch {}
+                    const desc = parseSkillDescription(path.resolve(currentPath, prompt.file));
+                    if (desc !== undefined) prompt.description = desc;
                 }
             }
         } catch (e) {
@@ -404,30 +413,36 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
         manifest.servers = manifest.servers || [];
         
         // Check for local .venv or Poetry
-        let pythonCmd = 'python3';
+        // Improved entry point detection
+        const commonEntryPoints = ['src/mcp_server.py', 'src/server.py', 'mcp_server.py', 'server.py', 'app.py', 'main.py'];
+        const entryPoint = commonEntryPoints.find(f => fs.existsSync(path.join(pkgPath, f))) || 'main.py';
+
+        let serverCommand: string;
+        let serverArgs: string[];
         if (fs.existsSync(poetryLockPath)) {
-            pythonCmd = 'poetry run python';
+            // 'poetry run python' is a shell expression, not a binary — must split into command + args
+            serverCommand = 'poetry';
+            serverArgs = ['run', 'python', entryPoint];
         } else {
+            let pythonCmd = 'python3';
             const venvDir = '.venv';
             const venvPath = path.join(pkgPath, venvDir);
             if (fs.existsSync(venvPath)) {
-                const venvPython = process.platform === 'win32' 
+                const venvPython = process.platform === 'win32'
                     ? path.join(venvPath, 'Scripts', 'python.exe')
                     : path.join(venvPath, 'bin', 'python3');
                 if (fs.existsSync(venvPython)) {
                     pythonCmd = venvPython;
                 }
             }
+            serverCommand = pythonCmd;
+            serverArgs = [entryPoint];
         }
-
-        // Improved entry point detection
-        const commonEntryPoints = ['src/mcp_server.py', 'src/server.py', 'mcp_server.py', 'server.py', 'app.py', 'main.py'];
-        const entryPoint = commonEntryPoints.find(f => fs.existsSync(path.join(pkgPath, f))) || 'main.py';
 
         manifest.servers.push({
           name: `${manifest.name}-python`,
-          command: pythonCmd,
-          args: [entryPoint],
+          command: serverCommand,
+          args: serverArgs,
           description: `Python server from ${entryPoint}`
         });
     }
@@ -471,37 +486,7 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
                   }
               } else if (file.endsWith('.md')) {
                   if (!instructionFiles.some(f => f.toLowerCase() === file.toLowerCase()) && file.toLowerCase() !== 'readme.md') {
-                      let description = `Markdown skill: ${relativePath}`;
-                      try {
-                          const firstLines = fs.readFileSync(fullPath, 'utf-8').split('\n');
-                          if (firstLines[0]?.trim() === '---') {
-                              // YAML frontmatter — extract description: field
-                              const fmEnd = firstLines.indexOf('---', 1);
-                              if (fmEnd > 0) {
-                                  const fmLines = firstLines.slice(1, fmEnd);
-                                  const descIdx = fmLines.findIndex(l => /^description\s*:/.test(l));
-                                  if (descIdx >= 0) {
-                                      const inline = fmLines[descIdx].replace(/^description\s*:\s*/, '').trim();
-                                      if (inline === '>-' || inline === '>' || inline === '|' || inline === '|-') {
-                                          const blockLines: string[] = [];
-                                          for (let i = descIdx + 1; i < fmLines.length; i++) {
-                                              if (/^\s/.test(fmLines[i])) blockLines.push(fmLines[i].trim());
-                                              else break;
-                                          }
-                                          description = blockLines.join(' ');
-                                      } else {
-                                          description = inline.replace(/^"|"$/g, '').trim();
-                                      }
-                                  } else {
-                                      const heading = firstLines.slice(fmEnd + 1).find(l => /^#+\s/.test(l));
-                                      if (heading) description = heading.replace(/^#+\s*/, '').trim();
-                                  }
-                              }
-                          } else {
-                              const firstNonEmpty = firstLines.find(l => l.trim().length > 0);
-                              if (firstNonEmpty) description = firstNonEmpty.replace(/^#+\s*/, '').trim();
-                          }
-                      } catch (e) {}
+                      const description = parseSkillDescription(fullPath) ?? `Markdown skill: ${relativePath}`;
 
                       manifest.prompts = manifest.prompts || [];
                       let skillName = path.parse(file).name;
