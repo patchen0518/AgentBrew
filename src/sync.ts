@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import * as toml from 'smol-toml';
 import { getBrewRoot } from './config';
+import { Logger } from './logger';
 import type { PackageInfo } from './registry';
 import packageJson from '../package.json';
 
@@ -402,12 +403,23 @@ export function cleanOrphanSkills(brewRoot?: string): SkillSyncResult[] {
     }
   }
 
-  if (state.codexMcp && !fs.existsSync(path.join(os.homedir(), '.codex'))) {
-    state.codexMcp = false;
+  if (state.codexMcp) {
+    const codexConfig = path.join(os.homedir(), '.codex', 'config.toml');
+    let codexEntryPresent = false;
+    try {
+      const raw = fs.readFileSync(codexConfig, 'utf-8');
+      codexEntryPresent = (toml.parse(raw) as any)?.mcp_servers?.agentbrew?.command === 'agentbrew';
+    } catch {}
+    if (!codexEntryPresent) state.codexMcp = false;
   }
 
-  if (state.kiroMcp && !fs.existsSync(path.join(os.homedir(), '.kiro'))) {
-    state.kiroMcp = false;
+  if (state.kiroMcp) {
+    const kiroConfig = path.join(os.homedir(), '.kiro', 'settings', 'mcp.json');
+    let kiroEntryPresent = false;
+    try {
+      kiroEntryPresent = JSON.parse(fs.readFileSync(kiroConfig, 'utf-8'))?.mcpServers?.agentbrew?.command === 'agentbrew';
+    } catch {}
+    if (!kiroEntryPresent) state.kiroMcp = false;
   }
 
   saveSyncedState(state, brewRoot);
@@ -499,12 +511,15 @@ export function unsyncMcpServerFromCursor(brewRoot?: string): SkillSyncResult[] 
 function _removeTomlSection(content: string, sectionHeader: string): string {
   const lines = content.split('\n');
   const headerLine = `[${sectionHeader}]`;
+  const subHeaderPrefix = `[${sectionHeader}.`;
   const startIdx = lines.findIndex(l => l.trim() === headerLine);
   if (startIdx === -1) return content;
 
   let endIdx = lines.length;
   for (let i = startIdx + 1; i < lines.length; i++) {
-    if (lines[i].trim().startsWith('[')) { endIdx = i; break; }
+    const trimmed = lines[i].trim();
+    // Stop at sibling or parent sections, but continue through subsections of this section
+    if (trimmed.startsWith('[') && !trimmed.startsWith(subHeaderPrefix)) { endIdx = i; break; }
   }
 
   // Also absorb a preceding blank line
@@ -537,7 +552,9 @@ export function syncMcpServerToCodex(brewRoot?: string): SkillSyncResult[] {
       saveSyncedState(state, brewRoot);
       return [{ entryName, status: 'already_exists', path: configPath }];
     }
-  } catch {}
+  } catch (e: any) {
+    Logger.warn(`config.toml at ${configPath} has invalid TOML syntax: ${e.message}. Attempting text-based repair.`);
+  }
 
   // Remove any stale entry (e.g. wrong command) before re-adding to avoid duplicate TOML table headers
   const cleaned = _removeTomlSection(raw, 'mcp_servers.agentbrew');

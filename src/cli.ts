@@ -160,7 +160,7 @@ program
     const env: Record<string, string> = {};
     for (const pair of options.env ?? []) {
       const idx = pair.indexOf('=');
-      if (idx === -1) {
+      if (idx <= 0) {
         Logger.error(`Invalid env var format '${pair}'. Expected KEY=VALUE.`);
         process.exit(1);
       }
@@ -311,12 +311,7 @@ program
       try {
         Logger.info(`Uninstalling ${name} from ${target.path}...`);
         fs.rmSync(target.path, { recursive: true, force: true });
-        const orphans = cleanOrphanSkills();
-        if (orphans.length > 0) {
-          Logger.info(`Removed ${orphans.length} stale skill link(s).`);
-        }
-        // Regenerate Cursor index with remaining skills (cleanOrphanSkills can't regenerate it)
-        syncSkillsToCursor(extractSkillEntries(discoverPackages()));
+        syncSkillsAfterChange({ cleanOrphans: true });
         Logger.info(`Successfully uninstalled package '${name}'`);
       } catch (error: any) {
         Logger.error(`Failed to uninstall: ${error.message}`);
@@ -394,11 +389,7 @@ program
 
       Logger.info(`Successfully uninstalled capability '${capability}' from package '${name}'`);
 
-      const orphans = cleanOrphanSkills();
-      if (orphans.length > 0) {
-        Logger.info(`Removed ${orphans.length} stale skill link(s).`);
-      }
-      syncSkillsToCursor(extractSkillEntries(discoverPackages()));
+      syncSkillsAfterChange({ cleanOrphans: true });
     } catch (error: any) {
       Logger.error(`Failed to uninstall capability: ${error.message}`);
       process.exit(1);
