@@ -510,5 +510,36 @@ function autoDetectManifest(pkgPath: string): PackageManifest {
     }
   }
 
+  // Warn when the package looks like an MCP project but produced no server entries.
+  // Users should create an agentbrew.toml with a [[servers]] entry.
+  if (!manifest.servers || manifest.servers.length === 0) {
+    let looksLikeMcp = false;
+
+    // Check Node.js: has @modelcontextprotocol/sdk in dependencies
+    const pkgJsonPath = path.join(pkgPath, 'package.json');
+    if (fs.existsSync(pkgJsonPath)) {
+      try {
+        const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'));
+        const allDeps = { ...pkgJson.dependencies, ...pkgJson.devDependencies, ...pkgJson.peerDependencies };
+        if ('@modelcontextprotocol/sdk' in allDeps) looksLikeMcp = true;
+      } catch {}
+    }
+
+    // Check Python: has 'mcp' in requirements.txt or pyproject.toml
+    if (!looksLikeMcp) {
+      const reqPath = path.join(pkgPath, 'requirements.txt');
+      const pyprojectPath = path.join(pkgPath, 'pyproject.toml');
+      if (fs.existsSync(reqPath) && /\bmcp\b/i.test(fs.readFileSync(reqPath, 'utf-8'))) looksLikeMcp = true;
+      if (!looksLikeMcp && fs.existsSync(pyprojectPath) && /\bmcp\b/i.test(fs.readFileSync(pyprojectPath, 'utf-8'))) looksLikeMcp = true;
+    }
+
+    if (looksLikeMcp) {
+      Logger.warn(
+        `Auto-detection found MCP dependencies in '${path.basename(pkgPath)}' but could not identify a server entry point. ` +
+        `Create an agentbrew.toml with a [[servers]] entry to register your server explicitly.`
+      );
+    }
+  }
+
   return manifest;
 }

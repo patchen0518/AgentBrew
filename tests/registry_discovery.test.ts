@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { discoverPackages } from '../src/registry';
+import { Logger } from '../src/logger';
 
 // Mock fs and path for registry discovery
 jest.mock('fs', () => {
@@ -143,7 +144,7 @@ args = ["index.js"]
 
   test('auto-detects poetry projects with poetry run python', () => {
     const pkgPath = path.join(PACKAGES_DIR, 'poetry-pkg');
-    
+
     (fs.existsSync as jest.Mock).mockImplementation((p: string) => {
         if (p === PACKAGES_DIR) return true;
         if (p === pkgPath) return true;
@@ -173,5 +174,45 @@ args = ["index.js"]
     expect(packages[0].manifest.servers?.[0].command).toBe('poetry');
     expect(packages[0].manifest.servers?.[0].args[0]).toBe('run');
     expect(packages[0].manifest.servers?.[0].args[1]).toBe('python');
+  });
+
+  test('warns when a Node.js package has MCP SDK but no discoverable entry point', () => {
+    const pkgPath = path.join(PACKAGES_DIR, 'no-entry-pkg');
+
+    (fs.existsSync as jest.Mock).mockImplementation((p: string) => {
+      if (p === PACKAGES_DIR) return true;
+      if (p === pkgPath) return true;
+      if (p === path.join(pkgPath, 'package.json')) return true;
+      // Deliberately no dist/, no index.js, no server.js, no agentbrew.toml, no mcp-manifest.json
+      return false;
+    });
+
+    (fs.readdirSync as jest.Mock).mockImplementation((p: string) => {
+      if (p === PACKAGES_DIR) return ['no-entry-pkg'];
+      if (p === pkgPath) return ['package.json'];
+      return [];
+    });
+
+    (fs.statSync as jest.Mock).mockImplementation((p: string) => ({
+      isDirectory: () => p === PACKAGES_DIR || p === pkgPath
+    }));
+
+    (fs.readFileSync as jest.Mock).mockImplementation((p: string) => {
+      if (p === path.join(pkgPath, 'package.json')) {
+        return JSON.stringify({
+          name: 'no-entry-pkg',
+          version: '1.0.0',
+          dependencies: { '@modelcontextprotocol/sdk': '^1.0.0' }
+        });
+      }
+      return '';
+    });
+
+    const warnSpy = jest.spyOn(Logger, 'warn');
+
+    discoverPackages(true);
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('no-entry-pkg'));
+    warnSpy.mockRestore();
   });
 });
